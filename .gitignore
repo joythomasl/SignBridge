@@ -3,6 +3,7 @@ dist/
 .chrome-test-profile/
 .chrome-smoke-profile/
 .chrome-template-profile/
+.chrome-word-template-profile/
 artifacts/
 dataset-inspect/
 dataset-preview/

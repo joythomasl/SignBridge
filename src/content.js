@@ -1,7 +1,7 @@
 import { VisionController } from "./vision.js";
 import { SignBridgeHud } from "./hud.js";
 import { MeetAdapter } from "./meet-adapter.js";
-import { StableGestureDetector, averageVectors, findBestMatch } from "./recognizer.js";
+import { StableGestureDetector, TemporalGestureDetector, averageVectors, findBestMatch } from "./recognizer.js";
 import { checkGemma, generateAnswer, mapQuestionToSign } from "./gemma.js";
 import { getSettings, getTemplates, saveSettings, saveTemplate } from "./storage.js";
 import { deleteClip, getClip, listClips, saveClip } from "./clip-store.js";
@@ -14,6 +14,7 @@ if (!document.getElementById("signbridge-root")) {
 async function boot() {
   let settings = await getSettings();
   const builtInTemplates = await loadBuiltInRecognitionTemplates();
+  const wordTemplates = await loadBuiltInWordTemplates();
   let templates = { ...builtInTemplates, ...(await getTemplates()) };
   const signLibrary = await loadBundledSignLibrary();
   const fingerspellingLibrary = await loadFingerspellingLibrary();
@@ -78,6 +79,21 @@ async function boot() {
     }
   });
 
+  const wordDetector = new TemporalGestureDetector({
+    templates: wordTemplates,
+    onCandidate: (match) => {
+      if (match?.gloss && match.score >= 0.7) hud.setDetected({ ...match, handPresent: true });
+    },
+    onAccept: ({ gloss }) => {
+      if (!gloss) return;
+      detector.reset();
+      glossBuffer.push(gloss);
+      hud.renderGlosses(glossBuffer, removeGloss);
+      hud.setStatus(`Word accepted: ${gloss}`, "success");
+      scheduleLiveGeneration();
+    }
+  });
+
   const vision = new VisionController({
     video: hud.video,
     canvas: hud.canvas,
@@ -86,6 +102,7 @@ async function boot() {
       if (!vector) {
         hud.setDetected(null);
         detector.update({ gloss: null, score: 0 });
+        wordDetector.update(null);
         return;
       }
       if (calibration) {
@@ -97,6 +114,7 @@ async function boot() {
       if (mediaRecorder?.state === "recording") return;
       const match = { ...findBestMatch(vector, templates), handPresent: true };
       detector.update(match);
+      wordDetector.update(vector);
     },
     onError(error) {
       hud.setStatus(`Vision error: ${error.message}`, "error");
@@ -125,7 +143,7 @@ async function boot() {
       await vision.start();
       hud.setCameraRunning(true);
       const calibratedCount = Object.keys(templates).length - Object.keys(builtInTemplates).length;
-      hud.setStatus(`Camera ready. ${Object.keys(builtInTemplates).length} fingerspelling signs loaded${calibratedCount > 0 ? ` · ${calibratedCount} custom calibrations` : ""}.`, "success");
+      hud.setStatus(`Camera ready. ${Object.keys(wordTemplates).length} words · ${Object.keys(builtInTemplates).length} fingerspelling signs loaded${calibratedCount > 0 ? ` · ${calibratedCount} custom calibrations` : ""}.`, "success");
     } catch (error) {
       hud.setCameraRunning(false);
       hud.setStatus(`Camera unavailable: ${error.message}`, "error");
@@ -136,6 +154,8 @@ async function boot() {
     cancelLiveTimer();
     if (mediaRecorder?.state === "recording") mediaRecorder.stop();
     vision.stop();
+    detector.reset();
+    wordDetector.reset();
     hud.setCameraRunning(false);
     hud.setDetected(null);
     hud.setStatus("Camera stopped.", "info");
@@ -166,6 +186,7 @@ async function boot() {
     const vector = averageVectors(completed.samples);
     templates = { ...builtInTemplates, ...(await saveTemplate(gloss, vector)) };
     detector.reset();
+    wordDetector.reset();
     hud.setCalibrationState(`${gloss} calibrated from ${completed.samples.length} frames.`);
     hud.setStatus(`${gloss} calibration saved locally.`, "success");
   }
@@ -188,6 +209,7 @@ async function boot() {
     cancelLiveTimer();
     glossBuffer = [];
     detector.reset();
+    wordDetector.reset();
     hud.renderGlosses(glossBuffer, removeGloss);
     hud.setStatus("Gloss buffer cleared.", "info");
   }
@@ -592,6 +614,18 @@ async function loadBuiltInRecognitionTemplates() {
     return manifest.templates && typeof manifest.templates === "object" ? manifest.templates : {};
   } catch (error) {
     console.warn("SignBridge recognition templates unavailable", error);
+    return {};
+  }
+}
+
+async function loadBuiltInWordTemplates() {
+  try {
+    const response = await fetch(chrome.runtime.getURL("assets/signs/word-templates.json"));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const manifest = await response.json();
+    return manifest.templates && typeof manifest.templates === "object" ? manifest.templates : {};
+  } catch (error) {
+    console.warn("SignBridge word recognition templates unavailable", error);
     return {};
   }
 }

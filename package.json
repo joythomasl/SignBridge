@@ -1,12 +1,13 @@
 {
   "name": "signbridge-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Gemma 4-powered bidirectional interview accessibility prototype for Google Meet",
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:fingerspelling-templates": "node scripts/build-fingerspelling-templates.mjs",
+    "build:word-templates": "node scripts/build-word-templates.mjs",
     "import:signs": "node scripts/import-sign-dataset.mjs",
     "import:fingerspelling": "node scripts/import-fingerspelling-dataset.mjs",
     "ollama:serve": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-ollama.ps1",

@@ -83,6 +83,96 @@ export function findBestMatch(vector, templates) {
   return best;
 }
 
+export function resampleSequence(sequence, targetLength) {
+  if (!sequence?.length || targetLength < 1) return [];
+  if (sequence.length === targetLength) return sequence;
+  if (targetLength === 1) return [sequence.at(-1)];
+  return Array.from({ length: targetLength }, (_, index) => {
+    const sourceIndex = Math.round(index * (sequence.length - 1) / (targetLength - 1));
+    return sequence[sourceIndex];
+  });
+}
+
+export function sequenceSimilarity(sequence, template) {
+  if (!sequence?.length || !template?.length) return 0;
+  const normalized = resampleSequence(sequence, template.length);
+  let total = 0;
+  for (let index = 0; index < template.length; index += 1) total += cosineSimilarity(normalized[index], template[index]);
+  return total / template.length;
+}
+
+export function findBestSequenceMatch(frames, templates) {
+  if (!frames?.length || frames.length < 18) return { gloss: null, score: 0, margin: 0 };
+  const lengths = [18, 24, 30, 40, 50, 60].filter((length) => length <= frames.length);
+  const matches = [];
+  for (const [gloss, template] of Object.entries(templates || {})) {
+    if (!template?.sequence?.length) continue;
+    let score = 0;
+    for (const length of lengths) {
+      score = Math.max(score, sequenceSimilarity(frames.slice(-length), template.sequence));
+    }
+    matches.push({ gloss, score, source: template.source || "temporal" });
+  }
+  matches.sort((a, b) => b.score - a.score);
+  const best = matches[0] || { gloss: null, score: 0 };
+  const second = matches[1]?.score || 0;
+  return { ...best, margin: best.score - second };
+}
+
+export class TemporalGestureDetector {
+  constructor({ templates, threshold = 0.76, minMargin = 0.018, holdMs = 320, cooldownMs = 1200, onCandidate, onAccept }) {
+    this.templates = templates || {};
+    this.threshold = threshold;
+    this.minMargin = minMargin;
+    this.holdMs = holdMs;
+    this.cooldownMs = cooldownMs;
+    this.onCandidate = onCandidate;
+    this.onAccept = onAccept;
+    this.reset();
+  }
+
+  reset() {
+    this.frames = [];
+    this.candidate = null;
+    this.since = 0;
+    this.cooldownUntil = 0;
+    this.lastEvaluation = 0;
+    this.neutralSince = 0;
+  }
+
+  update(vector, now = performance.now()) {
+    if (!vector) {
+      if (!this.neutralSince) this.neutralSince = now;
+      if (now - this.neutralSince > 700) this.frames = [];
+      return false;
+    }
+    this.neutralSince = 0;
+    this.frames.push(vector);
+    if (this.frames.length > 60) this.frames.shift();
+    if (now < this.cooldownUntil || now - this.lastEvaluation < 160 || this.frames.length < 18) return false;
+    this.lastEvaluation = now;
+    const match = findBestSequenceMatch(this.frames, this.templates);
+    this.onCandidate?.(match);
+    if (!match.gloss || match.score < this.threshold || match.margin < this.minMargin) {
+      this.candidate = null;
+      this.since = 0;
+      return false;
+    }
+    if (this.candidate !== match.gloss) {
+      this.candidate = match.gloss;
+      this.since = now;
+      return false;
+    }
+    if (now - this.since < this.holdMs) return false;
+    this.onAccept?.(match);
+    this.frames = [];
+    this.candidate = null;
+    this.since = 0;
+    this.cooldownUntil = now + this.cooldownMs;
+    return true;
+  }
+}
+
 export class StableGestureDetector {
   constructor({ threshold, holdMs, cooldownMs, onCandidate, onAccept }) {
     this.threshold = threshold;

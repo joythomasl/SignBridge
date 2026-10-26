@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   StableGestureDetector,
+  TemporalGestureDetector,
   averageVectors,
   cosineSimilarity,
   findBestMatch,
+  findBestSequenceMatch,
   landmarksToVector
 } from "../src/recognizer.js";
 
@@ -74,4 +76,29 @@ test("StableGestureDetector accepts only after the hold duration", () => {
   detector.update({ gloss: "YES", score: 0.99 }, 2300);
   detector.update({ gloss: "YES", score: 0.99 }, 2800);
   assert.deepEqual(accepted, ["YES", "YES"]);
+});
+
+test("findBestSequenceMatch identifies a temporal word", () => {
+  const frames = Array.from({ length: 24 }, () => [1, 0]);
+  const match = findBestSequenceMatch(frames, {
+    TEAM: { sequence: Array.from({ length: 12 }, () => [1, 0]) },
+    STOP: { sequence: Array.from({ length: 12 }, () => [0, 1]) }
+  });
+  assert.equal(match.gloss, "TEAM");
+  assert.ok(match.score > 0.99);
+  assert.ok(match.margin > 0.9);
+});
+
+test("TemporalGestureDetector accepts a stable sequence match", () => {
+  const accepted = [];
+  const detector = new TemporalGestureDetector({
+    templates: {
+      TEAM: { sequence: Array.from({ length: 12 }, () => [1, 0]) },
+      STOP: { sequence: Array.from({ length: 12 }, () => [0, 1]) }
+    },
+    holdMs: 320,
+    onAccept: (match) => accepted.push(match.gloss)
+  });
+  for (let index = 0; index < 24; index += 1) detector.update([1, 0], index * 170);
+  assert.deepEqual(accepted, ["TEAM"]);
 });
