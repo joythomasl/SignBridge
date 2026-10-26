@@ -47,7 +47,24 @@ try {
   await status.filter({ hasText: "Gemma 4 ready" }).waitFor({ timeout: 15000 });
 
   const reverseQuestion = "How are you?";
-  await panel.locator("#sb-question").fill(reverseQuestion);
+  await page.evaluate((caption) => {
+    document.querySelectorAll('[aria-live], [role="log"]').forEach((element) => {
+      if (!element.closest("#signbridge-root")) {
+        element.removeAttribute("aria-live");
+        element.removeAttribute("role");
+      }
+    });
+    const liveCaption = document.createElement("div");
+    liveCaption.id = "signbridge-smoke-caption";
+    liveCaption.setAttribute("aria-live", "polite");
+    liveCaption.textContent = caption;
+    document.body.appendChild(liveCaption);
+  }, reverseQuestion);
+  await page.waitForFunction((question) => {
+    const input = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-question");
+    return input?.value === question;
+  }, reverseQuestion, { timeout: 5000 });
+  const detectedCaption = await panel.locator("#sb-question").inputValue();
   await panel.locator("#sb-sign-caption").filter({ hasText: reverseQuestion }).waitFor({ timeout: 15000 });
   await panel.locator("#sb-sign-quality").filter({ hasText: "Dataset phrase clip" }).waitFor({ timeout: 15000 });
   await page.waitForFunction(() => {
@@ -89,6 +106,7 @@ try {
     extensionMounted: true,
     extensionOrigin,
     cameraStatus,
+    captionAutoDetected: detectedCaption,
     gemmaStatus: finalStatus,
     reverseCaption: await panel.locator("#sb-sign-caption").textContent(),
     reverseQuality: await panel.locator("#sb-sign-quality").textContent(),
