@@ -64,6 +64,7 @@ For a low-spec laptop, set the endpoint to an HTTPS Ollama-compatible Gemma 4 ga
 - **Model missing:** Run the `ollama pull` command above.
 - **Slow inference:** Close other GPU-heavy apps, keep the model warm, and keep prompts text-only.
 - **Gesture repeats:** Hold the sign once, then return to a neutral pose during the cooldown.
+- **Transition interpreted as a sign:** Wait until the camera label changes from **Hand moving** to a stable letter. Do not pause midway between two poses.
 - **Live audio starts too early:** Keep transitions between signs under one second or increase `livePauseMs` in the saved settings.
 - **Wrong gesture:** Face the palm and fingers toward the camera like the training examples, hold the pose steady, and recalibrate that label if it still does not generalize to the demo signer.
 - **No hand:** Improve lighting, keep the complete hand in frame, and avoid motion blur.

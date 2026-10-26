@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   StableGestureDetector,
   TemporalGestureDetector,
+  PoseStabilityGate,
   averageVectors,
   classifyLandmarkVector,
   cosineSimilarity,
@@ -68,6 +69,16 @@ test("classifyLandmarkVector returns the confident trained class", () => {
   });
   assert.equal(match.gloss, "A");
   assert.ok(match.score > 0.99);
+});
+
+test("PoseStabilityGate suppresses transitions and returns a settled average", () => {
+  const gate = new PoseStabilityGate({ windowMs: 400, minFrames: 5, maxAverageMotion: 0.04, maxPeakMotion: 0.11 });
+  for (let index = 0; index < 6; index += 1) {
+    assert.equal(gate.update([index * 0.2, 0], index * 80), null);
+  }
+  let stable = null;
+  for (let index = 6; index < 13; index += 1) stable = gate.update([1, 0], index * 80);
+  assert.deepEqual(stable, [1, 0]);
 });
 
 test("StableGestureDetector accepts only after the hold duration", () => {

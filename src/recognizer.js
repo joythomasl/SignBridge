@@ -98,6 +98,47 @@ export function averageVectors(vectors) {
   return average.map((value) => value / vectors.length);
 }
 
+function rootMeanSquareDistance(a, b) {
+  if (!a?.length || a.length !== b?.length) return Number.POSITIVE_INFINITY;
+  let squared = 0;
+  for (let index = 0; index < a.length; index += 1) squared += (a[index] - b[index]) ** 2;
+  return Math.sqrt(squared / a.length);
+}
+
+export class PoseStabilityGate {
+  constructor({ windowMs = 450, minFrames = 6, maxAverageMotion = 0.04, maxPeakMotion = 0.11 } = {}) {
+    this.windowMs = windowMs;
+    this.minFrames = minFrames;
+    this.maxAverageMotion = maxAverageMotion;
+    this.maxPeakMotion = maxPeakMotion;
+    this.reset();
+  }
+
+  reset() {
+    this.samples = [];
+  }
+
+  update(vector, now = performance.now()) {
+    if (!vector) {
+      this.reset();
+      return null;
+    }
+    this.samples.push({ vector, now });
+    const cutoff = now - this.windowMs;
+    while (this.samples.length > 1 && this.samples[0].now < cutoff) this.samples.shift();
+    if (this.samples.length < this.minFrames || now - this.samples[0].now < this.windowMs * 0.8) return null;
+
+    const motions = [];
+    for (let index = 1; index < this.samples.length; index += 1) {
+      motions.push(rootMeanSquareDistance(this.samples[index - 1].vector, this.samples[index].vector));
+    }
+    const averageMotion = motions.reduce((sum, motion) => sum + motion, 0) / motions.length;
+    const peakMotion = Math.max(...motions);
+    if (averageMotion > this.maxAverageMotion || peakMotion > this.maxPeakMotion) return null;
+    return averageVectors(this.samples.map((sample) => sample.vector));
+  }
+}
+
 export function cosineSimilarity(a, b) {
   if (!a?.length || a.length !== b?.length) return 0;
   let dot = 0;
@@ -146,6 +187,15 @@ export function sequenceSimilarity(sequence, template) {
   return total / template.length;
 }
 
+function sequenceMotionEnergy(sequence) {
+  if (!sequence?.length || sequence.length < 2) return 0;
+  let total = 0;
+  for (let index = 1; index < sequence.length; index += 1) {
+    total += 1 - cosineSimilarity(sequence[index - 1], sequence[index]);
+  }
+  return total / (sequence.length - 1);
+}
+
 export function findBestSequenceMatch(frames, templates) {
   if (!frames?.length || frames.length < 18) return { gloss: null, score: 0, margin: 0 };
   const lengths = [18, 24, 30, 40, 50, 60].filter((length) => length <= frames.length);
@@ -154,7 +204,15 @@ export function findBestSequenceMatch(frames, templates) {
     if (!template?.sequence?.length) continue;
     let score = 0;
     for (const length of lengths) {
-      score = Math.max(score, sequenceSimilarity(frames.slice(-length), template.sequence));
+      const sampled = resampleSequence(frames.slice(-length), template.sequence.length);
+      let candidateScore = sequenceSimilarity(sampled, template.sequence);
+      if (Number.isFinite(template.motion)) {
+        const observedMotion = sequenceMotionEnergy(sampled);
+        const largerMotion = Math.max(observedMotion, template.motion, 1e-5);
+        const motionRatio = Math.min(observedMotion, template.motion) / largerMotion;
+        candidateScore *= 0.7 + 0.3 * motionRatio;
+      }
+      score = Math.max(score, candidateScore);
     }
     matches.push({ gloss, score, source: template.source || "temporal" });
   }

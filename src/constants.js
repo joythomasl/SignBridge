@@ -3,11 +3,11 @@ export const DEFAULT_SETTINGS = {
   model: "gemma4:e2b-it-q4_K_M",
   apiKey: "",
   detectionThreshold: 0.92,
-  detectionHoldMs: 500,
-  detectionCooldownMs: 900,
+  detectionHoldMs: 750,
+  detectionCooldownMs: 1100,
   inferenceFps: 15,
   speechRate: 0.95,
-  livePauseMs: 1200
+  livePauseMs: 2000
 };
 
 export const DEMO_GLOSSES = [

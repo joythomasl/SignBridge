@@ -1,7 +1,7 @@
 import { VisionController } from "./vision.js";
 import { SignBridgeHud } from "./hud.js";
 import { MeetAdapter } from "./meet-adapter.js";
-import { StableGestureDetector, TemporalGestureDetector, averageVectors, classifyLandmarkVector, findBestMatch } from "./recognizer.js";
+import { PoseStabilityGate, StableGestureDetector, TemporalGestureDetector, averageVectors, classifyLandmarkVector, findBestMatch } from "./recognizer.js";
 import { checkGemma, generateAnswer, mapQuestionToSign } from "./gemma.js";
 import { getSettings, getTemplates, saveSettings, saveTemplate } from "./storage.js";
 import { deleteClip, getClip, listClips, saveClip } from "./clip-store.js";
@@ -64,8 +64,8 @@ async function boot() {
 
   const detector = new StableGestureDetector({
     threshold: settings.detectionThreshold,
-    holdMs: settings.detectionHoldMs,
-    cooldownMs: settings.detectionCooldownMs,
+    holdMs: Math.max(settings.detectionHoldMs, 750),
+    cooldownMs: Math.max(settings.detectionCooldownMs, 1100),
     onCandidate: (match) => {
       hud.setDetected(match);
       if (match?.gloss) scheduleLiveGeneration();
@@ -81,8 +81,12 @@ async function boot() {
 
   const wordDetector = new TemporalGestureDetector({
     templates: wordTemplates,
+    threshold: 0.88,
+    minMargin: 0.018,
+    holdMs: 650,
+    cooldownMs: 1800,
     onCandidate: (match) => {
-      if (match?.gloss && match.score >= 0.7) hud.setDetected({ ...match, handPresent: true });
+      if (match?.gloss && match.score >= 0.88 && match.margin >= 0.018) hud.setDetected({ ...match, handPresent: true });
     },
     onAccept: ({ gloss }) => {
       if (!gloss) return;
@@ -94,12 +98,15 @@ async function boot() {
     }
   });
 
+  const poseStabilityGate = new PoseStabilityGate();
+
   const vision = new VisionController({
     video: hud.video,
     canvas: hud.canvas,
     fps: settings.inferenceFps,
     onVector(vector) {
       if (!vector) {
+        poseStabilityGate.reset();
         hud.setDetected(null);
         detector.update({ gloss: null, score: 0 });
         wordDetector.update(null);
@@ -112,8 +119,14 @@ async function boot() {
         return;
       }
       if (mediaRecorder?.state === "recording") return;
-      const calibratedMatch = findBestMatch(vector, templates);
-      const trainedMatch = classifyLandmarkVector(vector, alphabetModel);
+      const stableVector = poseStabilityGate.update(vector);
+      if (!stableVector) {
+        detector.update({ gloss: null, score: 0, handPresent: true, unstable: true });
+        wordDetector.update(vector);
+        return;
+      }
+      const calibratedMatch = findBestMatch(stableVector, templates);
+      const trainedMatch = classifyLandmarkVector(stableVector, alphabetModel);
       const match = calibratedMatch.gloss && calibratedMatch.score >= settings.detectionThreshold
         ? calibratedMatch
         : trainedMatch;
@@ -161,6 +174,7 @@ async function boot() {
     vision.stop();
     detector.reset();
     wordDetector.reset();
+    poseStabilityGate.reset();
     hud.setCameraRunning(false);
     hud.setDetected(null);
     hud.setStatus("Camera stopped.", "info");
@@ -192,6 +206,7 @@ async function boot() {
     templates = await saveTemplate(gloss, vector);
     detector.reset();
     wordDetector.reset();
+    poseStabilityGate.reset();
     hud.setCalibrationState(`${gloss} calibrated from ${completed.samples.length} frames.`);
     hud.setStatus(`${gloss} calibration saved locally.`, "success");
   }
@@ -215,6 +230,7 @@ async function boot() {
     glossBuffer = [];
     detector.reset();
     wordDetector.reset();
+    poseStabilityGate.reset();
     hud.renderGlosses(glossBuffer, removeGloss);
     hud.setStatus("Gloss buffer cleared.", "info");
   }
@@ -268,7 +284,7 @@ async function boot() {
     if (!glossBuffer.length) return;
     cancelLiveTimer();
     hud.setLiveState("Signing detected — pause briefly to speak", true);
-    liveTimer = setTimeout(flushLivePhrase, settings.livePauseMs || 1200);
+    liveTimer = setTimeout(flushLivePhrase, Math.max(settings.livePauseMs || 0, 2000));
   }
 
   async function flushLivePhrase() {

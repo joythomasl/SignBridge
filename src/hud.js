@@ -212,7 +212,8 @@ export class SignBridgeHud {
 
   setDetected(match) {
     const label = this.$("#sb-detected");
-    if (!match?.gloss) label.textContent = match?.handPresent ? "Hand tracked · unknown sign" : "No hand";
+    if (match?.unstable) label.textContent = "Hand moving · hold the sign steady";
+    else if (!match?.gloss) label.textContent = match?.handPresent ? "Hand tracked · unknown sign" : "No hand";
     else label.textContent = `${match.gloss} · ${Math.round(match.score * 100)}%`;
   }
 
