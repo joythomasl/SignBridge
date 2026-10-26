@@ -1,0 +1,25 @@
+{
+  "name": "signbridge-ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gemma 4-powered bidirectional interview accessibility prototype for Google Meet",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "import:signs": "node scripts/import-sign-dataset.mjs",
+    "ollama:serve": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-ollama.ps1",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "smoke:ollama": "node scripts/smoke-ollama.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.22-rc.20250304"
+  },
+  "devDependencies": {
+    "adm-zip": "^0.6.1",
+    "esbuild": "^0.25.11",
+    "playwright-core": "^1.64.1",
+    "sharp": "^0.35.5"
+  }
+}

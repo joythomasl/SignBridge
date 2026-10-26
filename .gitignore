@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.chrome-test-profile/
+.chrome-smoke-profile/
+artifacts/
+dataset-inspect/
+dataset-preview/
+dataset-preview-phrases/
+*.log
+.DS_Store
+Thumbs.db

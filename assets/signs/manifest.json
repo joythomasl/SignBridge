@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "language": "Indian Sign Language",
+  "intents": [
+    {
+      "id": "ASK_INTRODUCTION",
+      "label": "Please introduce yourself",
+      "example": "Please introduce yourself."
+    },
+    {
+      "id": "ASK_EXPERIENCE",
+      "label": "Tell me about your experience",
+      "example": "Tell me about your experience."
+    },
+    {
+      "id": "ASK_PROJECT",
+      "label": "Explain a project",
+      "example": "Explain a project you worked on."
+    },
+    {
+      "id": "ASK_SKILLS",
+      "label": "What technical skills do you have",
+      "example": "What technical skills do you have?"
+    },
+    {
+      "id": "ASK_TEAMWORK",
+      "label": "How do you work with a team",
+      "example": "How do you work with a team?"
+    }
+  ],
+  "allowedGlosses": [
+    "YOU",
+    "INTRODUCE",
+    "EXPERIENCE",
+    "PROJECT",
+    "PYTHON",
+    "AI",
+    "SKILLS",
+    "TEAM",
+    "WORK",
+    "EXPLAIN",
+    "QUESTION"
+  ]
+}
