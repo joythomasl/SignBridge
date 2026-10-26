@@ -2,6 +2,7 @@ node_modules/
 dist/
 .chrome-test-profile/
 .chrome-smoke-profile/
+.chrome-template-profile/
 artifacts/
 dataset-inspect/
 dataset-preview/

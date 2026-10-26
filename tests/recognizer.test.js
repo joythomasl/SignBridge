@@ -40,6 +40,18 @@ test("landmarksToVector has a fixed two-hand vector length", () => {
   assert.ok(vector.some((value) => value !== 0));
 });
 
+test("landmarksToVector canonicalizes a one-hand sign across handedness", () => {
+  const landmarks = Array.from({ length: 21 }, (_, index) => ({
+    x: index * 0.01,
+    y: index * 0.02,
+    z: index * -0.001
+  }));
+  const mirrored = landmarks.map((point) => ({ ...point, x: -point.x }));
+  const right = landmarksToVector({ landmarks: [landmarks], handedness: [[{ categoryName: "Right" }]] });
+  const left = landmarksToVector({ landmarks: [mirrored], handedness: [[{ categoryName: "Left" }]] });
+  assert.ok(cosineSimilarity(right, left) > 0.999);
+});
+
 test("StableGestureDetector accepts only after the hold duration", () => {
   const accepted = [];
   const detector = new StableGestureDetector({

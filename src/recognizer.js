@@ -5,7 +5,8 @@ function normalizeHand(landmarks, mirrorX = false) {
 
   const wrist = landmarks[0];
   const middleMcp = landmarks[9];
-  const rawDx = middleMcp.x - wrist.x;
+  const direction = mirrorX ? -1 : 1;
+  const rawDx = (middleMcp.x - wrist.x) * direction;
   const rawDy = middleMcp.y - wrist.y;
   const scale = Math.max(Math.hypot(rawDx, rawDy, middleMcp.z - wrist.z), 1e-5);
   const rotation = Math.atan2(rawDy, rawDx) - Math.PI / 2;
@@ -14,10 +15,9 @@ function normalizeHand(landmarks, mirrorX = false) {
   const vector = [];
 
   for (const point of landmarks) {
-    let x = (point.x - wrist.x) / scale;
+    const x = ((point.x - wrist.x) / scale) * direction;
     const y = (point.y - wrist.y) / scale;
     const z = (point.z - wrist.z) / scale;
-    if (mirrorX) x *= -1;
     vector.push(x * cos - y * sin, x * sin + y * cos, z);
   }
   return vector;
@@ -28,6 +28,12 @@ export function landmarksToVector(result) {
     Left: new Array(HAND_VECTOR_SIZE).fill(0),
     Right: new Array(HAND_VECTOR_SIZE).fill(0)
   };
+
+  if (result?.landmarks?.length === 1) {
+    const handedness = result?.handedness?.[0]?.[0]?.categoryName || "Right";
+    slots.Right = normalizeHand(result.landmarks[0], handedness === "Left");
+    return [...slots.Left, ...slots.Right];
+  }
 
   (result?.landmarks || []).forEach((landmarks, index) => {
     const handedness = result?.handedness?.[index]?.[0]?.categoryName || (index === 0 ? "Right" : "Left");
@@ -65,7 +71,14 @@ export function findBestMatch(vector, templates) {
   let best = { gloss: null, score: 0 };
   for (const [gloss, template] of Object.entries(templates || {})) {
     const score = cosineSimilarity(vector, template.vector);
-    if (score > best.score) best = { gloss, score };
+    if (score > best.score) {
+      best = {
+        gloss,
+        score,
+        threshold: template.source === "bundled-fingerspelling-dataset" ? 0.78 : undefined,
+        source: template.source || "calibrated"
+      };
+    }
   }
   return best;
 }
@@ -88,8 +101,9 @@ export class StableGestureDetector {
   }
 
   update(match, now = performance.now()) {
-    if (!match.gloss || match.score < this.threshold || now < this.cooldownUntil) {
-      if (!match.gloss || match.score < this.threshold) this.lockedGloss = null;
+    const threshold = match.threshold ?? this.threshold;
+    if (!match.gloss || match.score < threshold || now < this.cooldownUntil) {
+      if (!match.gloss || match.score < threshold) this.lockedGloss = null;
       this.candidate = null;
       this.since = 0;
       this.onCandidate?.(match);

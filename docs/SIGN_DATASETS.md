@@ -11,6 +11,8 @@ The imported everyday-ISL archive contributes 44 labels with 40 frames per label
 
 The alphabet archive contributes 35 representative `A–Z` and `1–9` signs. SignBridge uses them as an immediate fingerspelling fallback so every detected question has a visual path while Gemma selects any better phrase or word clips.
 
+MediaPipe successfully produced built-in candidate-recognition templates for 32 of those signs. The representative `H`, `Q`, and `S` images did not yield hand landmarks and are therefore playback-only until better samples are imported or the signs are calibrated manually.
+
 The dataset did not include license metadata. Keep the assets local to the hackathon until reuse and redistribution permission is confirmed. The labels and sign accuracy must also be reviewed by a knowledgeable ISL signer.
 
 ## Add or replace vocabulary
@@ -38,6 +40,8 @@ For an alphanumeric dataset organized as `A/image.jpg`, `B/image.jpg`, and so on
 
 ```powershell
 npm run import:fingerspelling -- "C:\path\to\alphabet-dataset.zip"
+npm run build
+npm run build:fingerspelling-templates
 npm run build
 ```
 

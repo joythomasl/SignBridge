@@ -27,6 +27,7 @@ async function initialize() {
     } catch {
       landmarker = await createLandmarker("CPU");
     }
+    globalThis.__signbridgeVisionReady = true;
     reply({ type: "SIGNBRIDGE_VISION_READY" });
   } catch (error) {
     reply({ type: "SIGNBRIDGE_VISION_ERROR", message: error?.message || String(error) });
@@ -39,7 +40,9 @@ window.addEventListener("message", (event) => {
   try {
     const result = landmarker.detectForVideo(bitmap, timestamp);
     const landmarks = (result.landmarks || []).map((hand) => hand.map(({ x, y, z, visibility }) => ({ x, y, z, visibility })));
-    reply({ type: "SIGNBRIDGE_VISION_RESULT", landmarks });
+    const handedness = (result.handedness || []).map((categories) => categories.map(({ categoryName, score }) => ({ categoryName, score })));
+    globalThis.__signbridgeLastVisionResult = { timestamp, landmarks, handedness };
+    reply({ type: "SIGNBRIDGE_VISION_RESULT", landmarks, handedness });
   } catch (error) {
     reply({ type: "SIGNBRIDGE_VISION_ERROR", message: error?.message || String(error) });
   } finally {

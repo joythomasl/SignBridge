@@ -13,14 +13,16 @@ if (!document.getElementById("signbridge-root")) {
 
 async function boot() {
   let settings = await getSettings();
-  let templates = await getTemplates();
+  const builtInTemplates = await loadBuiltInRecognitionTemplates();
+  let templates = { ...builtInTemplates, ...(await getTemplates()) };
   const signLibrary = await loadBundledSignLibrary();
   const fingerspellingLibrary = await loadFingerspellingLibrary();
   const signClipsById = new Map(signLibrary.clips.map((clip) => [clip.id, clip]));
   const fingerspellingByLabel = new Map(fingerspellingLibrary.signs.map((sign) => [sign.label, sign.frame]));
   const candidateVocabulary = [...new Set([
     ...DEMO_GLOSSES,
-    ...signLibrary.clips.map((clip) => clip.label.toUpperCase())
+    ...signLibrary.clips.map((clip) => clip.label.toUpperCase()),
+    ...fingerspellingLibrary.signs.map((sign) => sign.label)
   ])].sort();
   let glossBuffer = [];
   let latestCaption = "";
@@ -93,7 +95,8 @@ async function boot() {
         return;
       }
       if (mediaRecorder?.state === "recording") return;
-      detector.update(findBestMatch(vector, templates));
+      const match = { ...findBestMatch(vector, templates), handPresent: true };
+      detector.update(match);
     },
     onError(error) {
       hud.setStatus(`Vision error: ${error.message}`, "error");
@@ -121,7 +124,8 @@ async function boot() {
       hud.setStatus("Starting camera and MediaPipe…", "info");
       await vision.start();
       hud.setCameraRunning(true);
-      hud.setStatus("Camera ready. Calibrate or begin signing.", "success");
+      const calibratedCount = Object.keys(templates).length - Object.keys(builtInTemplates).length;
+      hud.setStatus(`Camera ready. ${Object.keys(builtInTemplates).length} fingerspelling signs loaded${calibratedCount > 0 ? ` · ${calibratedCount} custom calibrations` : ""}.`, "success");
     } catch (error) {
       hud.setCameraRunning(false);
       hud.setStatus(`Camera unavailable: ${error.message}`, "error");
@@ -160,7 +164,7 @@ async function boot() {
       return;
     }
     const vector = averageVectors(completed.samples);
-    templates = await saveTemplate(gloss, vector);
+    templates = { ...builtInTemplates, ...(await saveTemplate(gloss, vector)) };
     detector.reset();
     hud.setCalibrationState(`${gloss} calibrated from ${completed.samples.length} frames.`);
     hud.setStatus(`${gloss} calibration saved locally.`, "success");
@@ -204,7 +208,7 @@ async function boot() {
   async function generateFromGlosses(question, glosses, live) {
     hud.setStatus(live ? "Live mode: translating the signed phrase…" : "Gemma 4 is rendering the signed meaning…", "info");
     try {
-      const response = await generateAnswer(settings, question, glosses);
+      const response = await generateAnswer(settings, question, collapseFingerspelling(glosses));
       const result = response.result || {};
       const answer = String(result.answer || "").trim();
       if (!answer) throw new Error("Gemma returned an empty answer");
@@ -538,6 +542,24 @@ function looksLikeQuestion(value) {
   return /\b(what|why|how|when|where|who|which|can|could|would|will|do|does|did|have|has|tell|describe|explain|please|walk)\b/.test(text);
 }
 
+function collapseFingerspelling(glosses) {
+  const collapsed = [];
+  let letters = "";
+  const flush = () => {
+    if (letters) collapsed.push(`FINGERSPELL:${letters}`);
+    letters = "";
+  };
+  for (const gloss of glosses) {
+    if (/^[A-Z1-9]$/.test(gloss)) letters += gloss;
+    else {
+      flush();
+      collapsed.push(gloss);
+    }
+  }
+  flush();
+  return collapsed;
+}
+
 async function loadBundledSignLibrary() {
   try {
     const response = await fetch(chrome.runtime.getURL("assets/signs/library.json"));
@@ -559,5 +581,17 @@ async function loadFingerspellingLibrary() {
   } catch (error) {
     console.warn("SignBridge fingerspelling library unavailable", error);
     return { version: 1, signs: [] };
+  }
+}
+
+async function loadBuiltInRecognitionTemplates() {
+  try {
+    const response = await fetch(chrome.runtime.getURL("assets/signs/fingerspelling-templates.json"));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const manifest = await response.json();
+    return manifest.templates && typeof manifest.templates === "object" ? manifest.templates : {};
+  } catch (error) {
+    console.warn("SignBridge recognition templates unavailable", error);
+    return {};
   }
 }

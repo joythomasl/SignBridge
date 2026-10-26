@@ -126,7 +126,10 @@ export class VisionController {
     }
     if (message.type !== "SIGNBRIDGE_VISION_RESULT") return;
     this.inFlight = false;
-    const result = { landmarks: Array.isArray(message.landmarks) ? message.landmarks : [] };
+    const result = {
+      landmarks: Array.isArray(message.landmarks) ? message.landmarks : [],
+      handedness: Array.isArray(message.handedness) ? message.handedness : []
+    };
     this.draw(result);
     if (result.landmarks.length) this.onVector?.(landmarksToVector(result), result);
     else this.onVector?.(null, result);

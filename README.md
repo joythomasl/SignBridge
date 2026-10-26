@@ -4,7 +4,7 @@ A 24-hour hackathon prototype that adds a candidate-controlled, bidirectional IS
 
 ## What works
 
-- Calibrate and recognize a small demo vocabulary.
+- Recognize 32 bundled dataset-derived fingerspelling signs, with optional calibration for custom word signs.
 - Automatically detect stabilized Meet questions, retain manual text as a fallback, and start visual translation without a button.
 - Generate a constrained answer with local Gemma 4.
 - Translate and speak signed phrases automatically after a 1.2-second signing pause.
@@ -48,6 +48,8 @@ The importer accepts `label/frame.png` or `label/frame.jpg`, including a ZIP nes
 ## Live sign-to-audio
 
 Live mode is always enabled. SignBridge continuously accumulates recognized glosses; after a short neutral pause, Gemma 4 renders the phrase and browser TTS speaks it automatically. The extension then clears only the processed glosses and continues listening. Meet questions automatically start exact phrase, word-sequence, or fingerspelling animation. Automatic chat sending remains disabled.
+
+The camera label distinguishes **No hand** from **Hand tracked · unknown sign**. Built-in recognition currently covers the 32 alphabet/digit poses for which MediaPipe found a hand in the supplied dataset. `H`, `Q`, and `S`, along with word-level signs such as `PYTHON`, require a custom calibration or a better temporal recognition dataset.
 
 ## Important limitation
 

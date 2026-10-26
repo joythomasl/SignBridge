@@ -44,7 +44,7 @@ Allowing all Chrome extensions is suitable only for the hackathon demo. After th
 2. Speak a question such as “How are you?” and confirm its caption automatically starts the animation.
 3. Open **ISL phrase clip studio** and record signer-verified replacements for the five interview intents where possible.
 4. Start the SignBridge camera.
-5. Calibrate only the 8–12 signs used in the scripted demo.
+5. Test the bundled fingerspelling signs. Calibrate only any word-level signs needed by the scripted demo.
 6. Select **Check Gemma** and verify the green ready status.
 7. Sign the demo phrase and confirm it is spoken automatically after the short neutral pause.
 8. Rehearse both automatic directions three times.
@@ -66,3 +66,5 @@ For a low-spec laptop, set the endpoint to an HTTPS Ollama-compatible Gemma 4 ga
 - **Gesture repeats:** Hold the sign once, then return to a neutral pose during the cooldown.
 - **Live audio starts too early:** Keep transitions between signs under one second or increase `livePauseMs` in the saved settings.
 - **Wrong gesture:** Recalibrate under the same camera angle and lighting used for the demo.
+- **No hand:** Improve lighting, keep the complete hand in frame, and avoid motion blur.
+- **Hand tracked · unknown sign:** MediaPipe sees the hand, but it does not match a bundled or calibrated template. Try a supported fingerspelling pose or open **Recognition setup and fallback** to calibrate that word sign.
