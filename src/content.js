@@ -1,9 +1,9 @@
 import { VisionController } from "./vision.js";
 import { SignBridgeHud } from "./hud.js";
 import { MeetAdapter } from "./meet-adapter.js";
-import { PoseStabilityGate, StableGestureDetector, TemporalGestureDetector, averageVectors, classifyLandmarkVector, findBestMatch } from "./recognizer.js";
-import { checkGemma, generateAnswer, mapQuestionToSign } from "./gemma.js";
-import { getSettings, getTemplates, saveSettings, saveTemplate } from "./storage.js";
+import { PoseStabilityGate, StableGestureDetector, TemporalGestureDetector, averageVectors, classifyLandmarkVector, findBestMatch, resampleSequence, sequenceMotionEnergy } from "./recognizer.js";
+import { checkGemma, generateAnswer, mapQuestionToSign, refineMeetCaption } from "./gemma.js";
+import { getSequenceTemplates, getSettings, getTemplates, saveSequenceTemplate, saveSettings, saveTemplate } from "./storage.js";
 import { deleteClip, getClip, listClips, saveClip } from "./clip-store.js";
 import { DEMO_GLOSSES, INTENTS } from "./constants.js";
 
@@ -14,16 +14,16 @@ if (!document.getElementById("signbridge-root")) {
 async function boot() {
   let settings = await getSettings();
   const alphabetModel = await loadAlphabetModel();
-  const wordTemplates = await loadBuiltInWordTemplates();
+  const builtInWordTemplates = await loadBuiltInWordTemplates();
+  let wordTemplates = { ...builtInWordTemplates, ...(await getSequenceTemplates()) };
   let templates = await getTemplates();
   const signLibrary = await loadBundledSignLibrary();
-  const fingerspellingLibrary = await loadFingerspellingLibrary();
   const signClipsById = new Map(signLibrary.clips.map((clip) => [clip.id, clip]));
-  const fingerspellingByLabel = new Map(fingerspellingLibrary.signs.map((sign) => [sign.label, sign.frame]));
+  const alphabetPoseByLabel = createAlphabetPoseMap(alphabetModel);
   const candidateVocabulary = [...new Set([
     ...DEMO_GLOSSES,
     ...signLibrary.clips.map((clip) => clip.label.toUpperCase()),
-    ...fingerspellingLibrary.signs.map((sign) => sign.label)
+    ...(alphabetModel.classes || [])
   ])].sort();
   let glossBuffer = [];
   let latestCaption = "";
@@ -40,6 +40,8 @@ async function boot() {
   let lastTranslatedQuestion = "";
   let lastSpokenText = "";
   let lastSpokenAt = 0;
+  let handsPresent = false;
+  let captionRevision = 0;
 
   const hud = new SignBridgeHud({
     startCamera,
@@ -68,25 +70,24 @@ async function boot() {
     cooldownMs: Math.max(settings.detectionCooldownMs, 1100),
     onCandidate: (match) => {
       hud.setDetected(match);
-      if (match?.gloss) scheduleLiveGeneration();
     },
     onAccept: ({ gloss }) => {
       if (!gloss) return;
       glossBuffer.push(gloss);
       hud.renderGlosses(glossBuffer, removeGloss);
       hud.setStatus(`Sign accepted: ${gloss}`, "success");
-      scheduleLiveGeneration();
+      hud.setLiveState("Sign accepted — continue signing, then lower your hands to speak", true);
     }
   });
 
   const wordDetector = new TemporalGestureDetector({
     templates: wordTemplates,
     threshold: 0.88,
-    minMargin: 0.018,
+    minMargin: 0.015,
     holdMs: 650,
     cooldownMs: 1800,
     onCandidate: (match) => {
-      if (match?.gloss && match.score >= 0.88 && match.margin >= 0.018) hud.setDetected({ ...match, handPresent: true });
+      if (match?.gloss && match.score >= 0.88 && match.margin >= 0.015) hud.setDetected({ ...match, handPresent: true });
     },
     onAccept: ({ gloss }) => {
       if (!gloss) return;
@@ -94,7 +95,7 @@ async function boot() {
       glossBuffer.push(gloss);
       hud.renderGlosses(glossBuffer, removeGloss);
       hud.setStatus(`Word accepted: ${gloss}`, "success");
-      scheduleLiveGeneration();
+      hud.setLiveState("Word accepted — continue signing, then lower your hands to speak", true);
     }
   });
 
@@ -106,12 +107,19 @@ async function boot() {
     fps: settings.inferenceFps,
     onVector(vector) {
       if (!vector) {
+        if (handsPresent) {
+          handsPresent = false;
+          scheduleLiveGeneration();
+        }
         poseStabilityGate.reset();
         hud.setDetected(null);
         detector.update({ gloss: null, score: 0 });
         wordDetector.update(null);
         return;
       }
+      handsPresent = true;
+      cancelLiveTimer();
+      if (glossBuffer.length) hud.setLiveState("Signing continues — audio waits until hands are lowered", true);
       if (calibration) {
         calibration.samples.push(vector);
         const progress = Math.min((performance.now() - calibration.startedAt) / calibration.durationMs, 1);
@@ -140,13 +148,27 @@ async function boot() {
   });
 
   const meet = new MeetAdapter({
-    onCaption(caption) {
+    async onCaption(caption) {
+      const revision = ++captionRevision;
       latestCaption = caption;
       hud.showLatestCaption(caption);
-      if (looksLikeQuestion(caption) && !isRecentSpokenCaption(caption)) {
-        hud.setQuestion(caption, "caption");
-        scheduleAutoQuestion(caption);
+      if (!looksLikeQuestion(caption) || isRecentSpokenCaption(caption)) return;
+      hud.setQuestion(caption, "caption");
+      scheduleAutoQuestion(caption);
+      let finalized = caption;
+      try {
+        const refined = await refineMeetCaption(settings, caption);
+        if (revision !== captionRevision) return;
+        const candidate = String(refined.result?.caption || "").trim();
+        if (candidate && candidate.length <= 320 && refined.result?.is_question !== false) finalized = candidate;
+      } catch {
+        // Keep the raw Meet caption when local Gemma is unavailable or busy.
       }
+      if (revision !== captionRevision) return;
+      latestCaption = finalized;
+      hud.showLatestCaption(finalized);
+      hud.setQuestion(finalized, "caption");
+      if (finalized !== caption) scheduleAutoQuestion(finalized);
     }
   });
   meet.start();
@@ -161,7 +183,8 @@ async function boot() {
       await vision.start();
       hud.setCameraRunning(true);
       const calibratedCount = Object.keys(templates).length;
-      hud.setStatus(`Camera ready. ${Object.keys(wordTemplates).length} words · ${alphabetModel.classes?.length || 0} trained letters/digits loaded${calibratedCount > 0 ? ` · ${calibratedCount} custom calibrations` : ""}.`, "success");
+      const personalWordCount = Object.values(wordTemplates).filter((template) => template.source === "personal-motion-training").length;
+      hud.setStatus(`Camera ready. ${Object.keys(builtInWordTemplates).length} words · ${alphabetModel.classes?.length || 0} trained letters/digits loaded${personalWordCount > 0 ? ` · ${personalWordCount} personal word motions` : ""}${calibratedCount > 0 ? ` · ${calibratedCount} custom poses` : ""}.`, "success");
     } catch (error) {
       hud.setCameraRunning(false);
       hud.setStatus(`Camera unavailable: ${error.message}`, "error");
@@ -170,6 +193,7 @@ async function boot() {
 
   function stopCamera() {
     cancelLiveTimer();
+    handsPresent = false;
     if (mediaRecorder?.state === "recording") mediaRecorder.stop();
     vision.stop();
     detector.reset();
@@ -187,28 +211,38 @@ async function boot() {
     }
     if (calibration) return;
     const gloss = hud.getCalibrationGloss();
-    hud.setCalibrationState(`Get ready to hold ${gloss}…`);
+    const staticPose = /^[A-Z1-9]$/.test(gloss);
+    hud.setCalibrationState(staticPose ? `Get ready to hold ${gloss}…` : `Get ready to perform ${gloss} once…`);
     await delay(650);
     calibration = {
       gloss,
       samples: [],
       startedAt: performance.now(),
-      durationMs: 1700
+      durationMs: staticPose ? 1700 : 3000
     };
     await delay(calibration.durationMs);
     const completed = calibration;
     calibration = null;
-    if (completed.samples.length < 8) {
-      hud.setCalibrationState(`Calibration failed: only ${completed.samples.length} usable frames. Try again.`);
+    const minimumSamples = staticPose ? 8 : 18;
+    if (completed.samples.length < minimumSamples) {
+      hud.setCalibrationState(`Training failed: only ${completed.samples.length}/${minimumSamples} usable frames. Keep both hands visible and try again.`);
       return;
     }
-    const vector = averageVectors(completed.samples);
-    templates = await saveTemplate(gloss, vector);
+    if (staticPose) {
+      const vector = averageVectors(completed.samples);
+      templates = await saveTemplate(gloss, vector);
+    } else {
+      const sequence = resampleSequence(completed.samples, 12);
+      wordTemplates = { ...builtInWordTemplates, ...(await saveSequenceTemplate(gloss, sequence, sequenceMotionEnergy(sequence))) };
+      wordDetector.templates = wordTemplates;
+    }
     detector.reset();
     wordDetector.reset();
     poseStabilityGate.reset();
-    hud.setCalibrationState(`${gloss} calibrated from ${completed.samples.length} frames.`);
-    hud.setStatus(`${gloss} calibration saved locally.`, "success");
+    hud.setCalibrationState(staticPose
+      ? `${gloss} pose trained from ${completed.samples.length} frames.`
+      : `${gloss} motion trained from ${completed.samples.length} frames.`);
+    hud.setStatus(`${gloss} personal ${staticPose ? "pose" : "motion"} saved locally.`, "success");
   }
 
   function removeGloss(index) {
@@ -259,9 +293,18 @@ async function boot() {
       hud.setMetrics(response.metrics);
       if (live && !result.needs_clarification) {
         speakText(answer);
+        let deliveredToMeet = false;
+        try {
+          await meet.sendChatMessage(`🤟 Candidate via SignBridge: ${answer}`);
+          deliveredToMeet = true;
+        } catch {
+          // Meet chat must be open; local speech still proceeds.
+        }
         removeProcessedGlosses(glosses);
         hud.setLiveState("Spoken — listening for the next phrase", true);
-        hud.setStatus("Live sign-to-audio response spoken. Listening continues.", "success");
+        hud.setStatus(deliveredToMeet
+          ? "Live response spoken locally and transmitted in Meet chat. Listening continues."
+          : "Live response spoken locally. Open Meet chat for guaranteed remote text delivery.", deliveredToMeet ? "success" : "warn");
       } else if (live) {
         hud.setLiveState("Clarification needed — nothing was spoken", true);
       } else if (!result.needs_clarification) {
@@ -281,15 +324,16 @@ async function boot() {
   }
 
   function scheduleLiveGeneration() {
-    if (!glossBuffer.length) return;
+    if (!glossBuffer.length || handsPresent) return;
     cancelLiveTimer();
-    hud.setLiveState("Signing detected — pause briefly to speak", true);
+    hud.setLiveState("Hands lowered — translating the completed phrase", true);
     liveTimer = setTimeout(flushLivePhrase, Math.max(settings.livePauseMs || 0, 2000));
   }
 
   async function flushLivePhrase() {
     liveTimer = null;
     if (!glossBuffer.length) return;
+    if (handsPresent) return;
     if (liveGenerating) {
       scheduleLiveGeneration();
       return;
@@ -344,21 +388,21 @@ async function boot() {
         question,
         glosses: [localExact.label.toUpperCase()],
         clipUrl: null,
-        frameSequences: [{ fps: localExact.fps, frames: localExact.frames.map((frame) => chrome.runtime.getURL(frame)) }],
+        vectorSequences: createWordVectorSequences([localExact], wordTemplates),
         exact: true,
-        quality: "Dataset phrase clip · review"
+        quality: "Generated avatar · dataset motion"
       });
       lastTranslatedQuestion = question;
       hud.setStatus("Interviewer question detected and exact dataset animation started.", "warn");
       return;
     }
     const spellingSequence = createFingerspellingSequence(question);
-    if (spellingSequence.frames.length) {
+    if (spellingSequence.vectors.length) {
       hud.showSignResult({
         question,
         glosses: ["LIVE FINGERSPELLING"],
         clipUrl: null,
-        frameSequences: [spellingSequence],
+        vectorSequences: [spellingSequence],
         exact: false,
         quality: "Live fingerspelling · approximate"
       });
@@ -380,18 +424,15 @@ async function boot() {
       const clip = validIntent === "UNSUPPORTED" ? null : await getClip(validIntent);
       if (signClipUrl) URL.revokeObjectURL(signClipUrl);
       signClipUrl = clip?.blob ? URL.createObjectURL(clip.blob) : null;
-      const datasetSequences = selectedClips.map((item) => ({
-        fps: item.fps,
-        frames: item.frames.map((frame) => chrome.runtime.getURL(frame))
-      }));
-      const usingFingerspelling = !signClipUrl && !datasetSequences.length && spellingSequence.frames.length;
-      const frameSequences = signClipUrl ? [] : datasetSequences.length ? datasetSequences : usingFingerspelling ? [spellingSequence] : [];
+      const datasetSequences = createWordVectorSequences(selectedClips, wordTemplates);
+      const usingFingerspelling = !signClipUrl && !datasetSequences.length && spellingSequence.vectors.length;
+      const vectorSequences = signClipUrl ? [] : datasetSequences.length ? datasetSequences : usingFingerspelling ? [spellingSequence] : [];
       const quality = signClipUrl
         ? "Verified signer recording"
         : mappedExactBuiltIn
-          ? "Dataset phrase clip · review"
+          ? "Generated avatar · dataset motion"
           : datasetSequences.length
-            ? "Approximate dataset sequence"
+            ? "Generated avatar sequence · approximate"
             : usingFingerspelling
               ? "Live fingerspelling · approximate"
             : "Unsupported";
@@ -399,7 +440,7 @@ async function boot() {
         question,
         glosses,
         clipUrl: signClipUrl,
-        frameSequences,
+        vectorSequences,
         exact: Boolean(signClipUrl || mappedExactBuiltIn),
         quality,
         message: validIntent === "UNSUPPORTED"
@@ -416,14 +457,14 @@ async function boot() {
     } catch (error) {
       hud.showSignResult({
         question,
-        glosses: spellingSequence.frames.length ? ["LIVE FINGERSPELLING"] : [],
+        glosses: spellingSequence.vectors.length ? ["LIVE FINGERSPELLING"] : [],
         clipUrl: null,
-        frameSequences: spellingSequence.frames.length ? [spellingSequence] : [],
+        vectorSequences: spellingSequence.vectors.length ? [spellingSequence] : [],
         exact: false,
-        quality: spellingSequence.frames.length ? "Live fingerspelling · approximate" : "Unsupported",
+        quality: spellingSequence.vectors.length ? "Generated fingerspelling avatar · approximate" : "Unsupported",
         message: `Could not map this question: ${error.message}`
       });
-      hud.setStatus(spellingSequence.frames.length ? "Gemma mapping failed; live fingerspelling continues." : `Question-to-ISL failed: ${error.message}`, "warn");
+      hud.setStatus(spellingSequence.vectors.length ? "Gemma mapping failed; live fingerspelling continues." : `Question-to-ISL failed: ${error.message}`, "warn");
     } finally {
       reverseGenerating = false;
       if (queuedQuestion && queuedQuestion !== question) {
@@ -468,13 +509,13 @@ async function boot() {
   }
 
   function createFingerspellingSequence(text) {
-    const frames = [];
+    const vectors = [];
     for (const character of String(text || "").toUpperCase().slice(0, 80)) {
-      const frame = fingerspellingByLabel.get(character);
-      if (frame) frames.push(chrome.runtime.getURL(frame));
-      else if (/\s/.test(character) && frames.length) frames.push(frames.at(-1), frames.at(-1));
+      const vector = alphabetPoseByLabel.get(character);
+      if (vector) vectors.push(vector);
+      else if (/\s/.test(character) && vectors.length) vectors.push(null, null);
     }
-    return { fps: 4, frames };
+    return { fps: 3, vectors };
   }
 
   async function copy() {
@@ -603,6 +644,28 @@ function collapseFingerspelling(glosses) {
   return collapsed;
 }
 
+function createAlphabetPoseMap(model) {
+  const poses = new Map();
+  if (!Array.isArray(model?.classes) || !Array.isArray(model?.centroids)) return poses;
+  model.classes.forEach((label, classIndex) => {
+    const centroid = model.centroids[classIndex];
+    if (!Array.isArray(centroid) || centroid.length !== model.featureCount) return;
+    const vector = centroid.map((value, featureIndex) => (
+      value * (model.scale?.[featureIndex] || 1) + (model.mean?.[featureIndex] || 0)
+    ));
+    poses.set(label, vector);
+  });
+  return poses;
+}
+
+function createWordVectorSequences(clips, templates) {
+  return clips.flatMap((clip) => {
+    const template = templates[clip.label.toUpperCase()];
+    if (!Array.isArray(template?.sequence) || !template.sequence.length) return [];
+    return [{ fps: 10, vectors: template.sequence }];
+  });
+}
+
 async function loadBundledSignLibrary() {
   try {
     const response = await fetch(chrome.runtime.getURL("assets/signs/library.json"));
@@ -612,18 +675,6 @@ async function loadBundledSignLibrary() {
   } catch (error) {
     console.warn("SignBridge bundled sign library unavailable", error);
     return { version: 1, clips: [] };
-  }
-}
-
-async function loadFingerspellingLibrary() {
-  try {
-    const response = await fetch(chrome.runtime.getURL("assets/signs/fingerspelling.json"));
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const manifest = await response.json();
-    return { ...manifest, signs: Array.isArray(manifest.signs) ? manifest.signs : [] };
-  } catch (error) {
-    console.warn("SignBridge fingerspelling library unavailable", error);
-    return { version: 1, signs: [] };
   }
 }
 

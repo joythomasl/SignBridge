@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -23,11 +23,16 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 scaler = StandardScaler().fit(X_train)
 X_train_scaled = scaler.transform(X_train)
-classifier = LogisticRegression(
-    C=1.5,
-    max_iter=2500,
-    solver="lbfgs",
-    class_weight="balanced"
+classifier = MLPClassifier(
+    hidden_layer_sizes=(128, 64),
+    activation="relu",
+    solver="adam",
+    alpha=0.0005,
+    batch_size=128,
+    learning_rate_init=0.001,
+    max_iter=350,
+    early_stopping=False,
+    random_state=42
 ).fit(X_train_scaled, y_train)
 
 probabilities = classifier.predict_proba(scaler.transform(X_test))
@@ -48,13 +53,13 @@ for label in classifier.classes_:
 
 model = {
     "version": 2,
-    "type": "multinomial-logistic-regression",
+    "type": "mlp-landmark-classifier",
     "featureCount": int(X.shape[1]),
     "classes": classifier.classes_.tolist(),
     "mean": scaler.mean_.tolist(),
     "scale": scaler.scale_.tolist(),
-    "coef": classifier.coef_.tolist(),
-    "intercept": classifier.intercept_.tolist(),
+    "weights": [layer.tolist() for layer in classifier.coefs_],
+    "biases": [layer.tolist() for layer in classifier.intercepts_],
     "centroids": centroids,
     "distanceThresholds": distance_thresholds,
     "confidenceThreshold": 0.58,

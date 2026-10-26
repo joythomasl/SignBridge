@@ -54,15 +54,35 @@ export function landmarksToVector(result) {
 }
 
 export function classifyLandmarkVector(vector, model) {
-  if (!model?.classes?.length || !model?.coef?.length || vector.length !== model.featureCount) {
+  if (!model?.classes?.length || vector.length !== model.featureCount) {
     return { gloss: null, score: 0, margin: 0, source: "trained-alphabet-model" };
   }
   const standardized = vector.map((value, index) => (value - model.mean[index]) / (model.scale[index] || 1));
-  const logits = model.coef.map((weights, classIndex) => {
-    let value = model.intercept[classIndex] || 0;
-    for (let index = 0; index < standardized.length; index += 1) value += weights[index] * standardized[index];
-    return value;
-  });
+  let logits;
+  if (model.type === "mlp-landmark-classifier" && model.weights?.length && model.biases?.length) {
+    let activation = standardized;
+    model.weights.forEach((weights, layerIndex) => {
+      const outputSize = model.biases[layerIndex].length;
+      const output = new Array(outputSize).fill(0);
+      for (let outputIndex = 0; outputIndex < outputSize; outputIndex += 1) {
+        let value = model.biases[layerIndex][outputIndex] || 0;
+        for (let inputIndex = 0; inputIndex < activation.length; inputIndex += 1) {
+          value += activation[inputIndex] * weights[inputIndex][outputIndex];
+        }
+        output[outputIndex] = layerIndex < model.weights.length - 1 ? Math.max(0, value) : value;
+      }
+      activation = output;
+    });
+    logits = activation;
+  } else if (model.coef?.length) {
+    logits = model.coef.map((weights, classIndex) => {
+      let value = model.intercept[classIndex] || 0;
+      for (let index = 0; index < standardized.length; index += 1) value += weights[index] * standardized[index];
+      return value;
+    });
+  } else {
+    return { gloss: null, score: 0, margin: 0, source: "trained-alphabet-model" };
+  }
   const maximum = Math.max(...logits);
   const probabilities = logits.map((value) => Math.exp(value - maximum));
   const total = probabilities.reduce((sum, value) => sum + value, 0) || 1;
@@ -187,7 +207,29 @@ export function sequenceSimilarity(sequence, template) {
   return total / template.length;
 }
 
-function sequenceMotionEnergy(sequence) {
+export function dynamicTimeWarpingSimilarity(sequence, template) {
+  if (!sequence?.length || !template?.length) return 0;
+  const rows = sequence.length + 1;
+  const columns = template.length + 1;
+  const costs = Array.from({ length: rows }, () => new Float64Array(columns).fill(Number.POSITIVE_INFINITY));
+  const steps = Array.from({ length: rows }, () => new Uint16Array(columns));
+  costs[0][0] = 0;
+  for (let row = 1; row < rows; row += 1) {
+    for (let column = 1; column < columns; column += 1) {
+      const predecessors = [
+        [costs[row - 1][column], steps[row - 1][column]],
+        [costs[row][column - 1], steps[row][column - 1]],
+        [costs[row - 1][column - 1], steps[row - 1][column - 1]]
+      ];
+      predecessors.sort((a, b) => a[0] - b[0]);
+      costs[row][column] = predecessors[0][0] + (1 - cosineSimilarity(sequence[row - 1], template[column - 1]));
+      steps[row][column] = predecessors[0][1] + 1;
+    }
+  }
+  return Math.max(0, 1 - costs.at(-1).at(-1) / Math.max(steps.at(-1).at(-1), 1));
+}
+
+export function sequenceMotionEnergy(sequence) {
   if (!sequence?.length || sequence.length < 2) return 0;
   let total = 0;
   for (let index = 1; index < sequence.length; index += 1) {
@@ -205,7 +247,7 @@ export function findBestSequenceMatch(frames, templates) {
     let score = 0;
     for (const length of lengths) {
       const sampled = resampleSequence(frames.slice(-length), template.sequence.length);
-      let candidateScore = sequenceSimilarity(sampled, template.sequence);
+      let candidateScore = dynamicTimeWarpingSimilarity(frames.slice(-length), template.sequence);
       if (Number.isFinite(template.motion)) {
         const observedMotion = sequenceMotionEnergy(sampled);
         const largerMotion = Math.max(observedMotion, template.motion, 1e-5);

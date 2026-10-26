@@ -26,6 +26,23 @@ export async function saveTemplate(gloss, vector) {
   return templates;
 }
 
+export async function getSequenceTemplates() {
+  const result = await chrome.storage.local.get("gestureSequenceTemplates");
+  return result.gestureSequenceTemplates || {};
+}
+
+export async function saveSequenceTemplate(gloss, sequence, motion) {
+  const templates = await getSequenceTemplates();
+  templates[gloss] = {
+    sequence,
+    motion,
+    source: "personal-motion-training",
+    updatedAt: new Date().toISOString()
+  };
+  await chrome.storage.local.set({ gestureSequenceTemplates: templates });
+  return templates;
+}
+
 export async function deleteTemplate(gloss) {
   const templates = await getTemplates();
   delete templates[gloss];

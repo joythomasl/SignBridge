@@ -7,6 +7,16 @@ const CONNECTIONS = [
   [9, 13], [13, 14], [14, 15], [15, 16],
   [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]
 ];
+const FINGER_COLORS = ["#ffb45f", "#55e6d5", "#78a9ff", "#d68cff", "#ff7ca8"];
+
+function colorForPoint(index) {
+  if (index === 0) return "#ffffff";
+  if (index <= 4) return FINGER_COLORS[0];
+  if (index <= 8) return FINGER_COLORS[1];
+  if (index <= 12) return FINGER_COLORS[2];
+  if (index <= 16) return FINGER_COLORS[3];
+  return FINGER_COLORS[4];
+}
 
 export class VisionController {
   constructor({ video, canvas, fps = 15, onVector, onError }) {
@@ -146,21 +156,29 @@ export class VisionController {
     context.translate(width, 0);
     context.scale(-1, 1);
     context.lineWidth = 3;
-    context.strokeStyle = "#33d6c8";
-    context.fillStyle = "#ecfeff";
 
     for (const hand of result.landmarks) {
       for (const [start, end] of CONNECTIONS) {
+        context.strokeStyle = colorForPoint(end);
         context.beginPath();
         context.moveTo(hand[start].x * width, hand[start].y * height);
         context.lineTo(hand[end].x * width, hand[end].y * height);
         context.stroke();
       }
-      for (const point of hand) {
+      hand.forEach((point, index) => {
+        context.fillStyle = colorForPoint(index);
         context.beginPath();
         context.arc(point.x * width, point.y * height, 4, 0, Math.PI * 2);
         context.fill();
-      }
+        if ([0, 4, 8, 12, 16, 20].includes(index)) {
+          context.save();
+          context.scale(-1, 1);
+          context.fillStyle = "#ffffff";
+          context.font = "bold 11px system-ui";
+          context.fillText(String(index), -point.x * width + 6, point.y * height - 6);
+          context.restore();
+        }
+      });
     }
     context.restore();
   }

@@ -27,6 +27,10 @@ const context = await chromium.launchPersistentContext(profilePath, {
 
 try {
   const page = context.pages()[0] || await context.newPage();
+  page.on("pageerror", (error) => console.error(`PAGE ERROR: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error(`PAGE CONSOLE: ${message.text()}`);
+  });
   await page.goto("https://meet.google.com/abc-defg-hij", { waitUntil: "domcontentloaded", timeout: 45000 });
   const rootHost = page.locator("#signbridge-root");
   await rootHost.waitFor({ state: "attached", timeout: 15000 });
@@ -60,16 +64,18 @@ try {
     liveCaption.textContent = caption;
     document.body.appendChild(liveCaption);
   }, reverseQuestion);
-  await page.waitForFunction((question) => {
-    const input = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-question");
-    return input?.value === question;
-  }, reverseQuestion, { timeout: 5000 });
-  const detectedCaption = await panel.locator("#sb-question").inputValue();
-  await panel.locator("#sb-sign-caption").filter({ hasText: reverseQuestion }).waitFor({ timeout: 15000 });
-  await panel.locator("#sb-sign-quality").filter({ hasText: "Dataset phrase clip" }).waitFor({ timeout: 15000 });
   await page.waitForFunction(() => {
-    const image = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-sign-image");
-    return Boolean(image && !image.hidden && image.getAttribute("src"));
+    const input = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-question");
+    return Boolean(input?.value);
+  }, null, { timeout: 15000 });
+  const detectedCaption = await panel.locator("#sb-question").inputValue();
+  await panel.locator("#sb-sign-caption").filter({ hasText: detectedCaption }).waitFor({ timeout: 15000 });
+  await panel.locator("#sb-sign-quality").filter({ hasText: "Generated avatar" }).waitFor({ timeout: 15000 });
+  await page.waitForFunction(() => {
+    const avatar = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-sign-avatar");
+    if (!avatar || avatar.hidden) return false;
+    const pixels = avatar.getContext("2d").getImageData(0, 0, avatar.width, avatar.height).data;
+    return pixels.some((value, index) => index % 4 !== 3 && value > 0);
   }, null, { timeout: 5000 });
   await page.evaluate(() => {
     const body = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-body");
@@ -79,6 +85,18 @@ try {
 
   const question = "Please explain a project you worked on.";
   await panel.locator("#sb-question").fill(question);
+  await page.evaluate(() => {
+    const chat = document.createElement("div");
+    chat.contentEditable = "true";
+    chat.setAttribute("role", "textbox");
+    chat.setAttribute("aria-label", "Send a message");
+    chat.style.cssText = "position:fixed;left:10px;top:10px;width:200px;height:40px";
+    const send = document.createElement("button");
+    send.setAttribute("aria-label", "Send message");
+    send.style.cssText = "position:fixed;left:220px;top:10px;width:80px;height:40px";
+    send.addEventListener("click", () => { document.body.dataset.signbridgeChatSent = chat.textContent || "sent"; });
+    document.body.append(chat, send);
+  });
 
   await panel.locator("details").filter({ hasText: "Recognition setup and fallback" }).locator("summary").click();
   const glossSelect = panel.locator("#sb-calibration-gloss");
@@ -92,6 +110,7 @@ try {
     const host = document.querySelector("#signbridge-root");
     return Boolean(host?.shadowRoot?.querySelector("#sb-answer")?.value);
   }, null, { timeout: 15000 });
+  await page.waitForFunction(() => Boolean(document.body.dataset.signbridgeChatSent), null, { timeout: 5000 });
 
   const answerText = await answer.inputValue();
   const finalStatus = await status.textContent();
@@ -111,6 +130,7 @@ try {
     reverseCaption: await panel.locator("#sb-sign-caption").textContent(),
     reverseQuality: await panel.locator("#sb-sign-quality").textContent(),
     answer: answerText,
+    meetChatDelivery: await page.evaluate(() => document.body.dataset.signbridgeChatSent),
     signScreenshot: signArtifactPath,
     screenshot: artifactPath
   }, null, 2));

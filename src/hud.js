@@ -1,12 +1,14 @@
 import { DEMO_GLOSSES, INTENTS } from "./constants.js";
+import { drawSigningAvatar, interpolateVectors } from "./avatar-renderer.js";
 
 export class SignBridgeHud {
   constructor(handlers, vocabulary = DEMO_GLOSSES) {
     this.handlers = handlers;
     this.vocabulary = vocabulary;
-    this.signFrames = [];
+    this.signVectors = [];
     this.signFrameIndex = 0;
-    this.signFrameTimer = null;
+    this.signAnimationRequest = null;
+    this.signAnimationStartedAt = 0;
     this.signFrameRate = 10;
     this.signPlaybackRate = 1;
     this.host = document.createElement("div");
@@ -47,7 +49,7 @@ export class SignBridgeHud {
             <div class="sb-section-title"><span>2</span> Interviewer → ISL</div>
             <div class="sb-sign-stage">
               <video id="sb-sign-video" playsinline controls hidden></video>
-              <img id="sb-sign-image" alt="ISL dataset animation" hidden>
+              <canvas id="sb-sign-avatar" width="640" height="400" aria-label="Generated landmark signing avatar" hidden></canvas>
               <div id="sb-sign-placeholder" class="sb-sign-placeholder">Translate a supported question to play its verified ISL clip.</div>
             </div>
             <div id="sb-sign-caption" class="sb-sign-caption"></div>
@@ -87,13 +89,13 @@ export class SignBridgeHud {
             <button id="sb-clear-glosses" class="sb-full-button">Clear current phrase</button>
             <details class="sb-details">
               <summary>Recognition setup and fallback</summary>
-              <p class="sb-muted">Calibration is needed only for signs the camera has not learned for this signer.</p>
+              <p class="sb-muted">For a letter, hold the pose. For a word, perform the complete motion once. Personal training stays on this laptop.</p>
               <div class="sb-calibration">
                 <select id="sb-calibration-gloss">${glossOptions}</select>
                 <button id="sb-calibrate">Calibrate sign</button>
               </div>
               <button id="sb-add-gloss" class="sb-full-button">Add selected gloss manually</button>
-              <div id="sb-calibration-state" class="sb-muted">Calibrate only the signs used in your demo.</div>
+              <div id="sb-calibration-state" class="sb-muted">Train only signs that do not recognize reliably for you.</div>
             </details>
           </section>
 
@@ -120,7 +122,11 @@ export class SignBridgeHud {
             </div>
           </details>
         </div>
-      </aside>`;
+      </aside>
+      <div id="sb-caption-overlay" class="sb-caption-overlay" aria-live="polite" hidden>
+        <span>Interviewer</span>
+        <strong id="sb-caption-overlay-text"></strong>
+      </div>`;
   }
 
   $(selector) {
@@ -197,6 +203,8 @@ export class SignBridgeHud {
 
   showLatestCaption(caption) {
     this.$("#sb-caption-state").textContent = `Caption ready: ${caption.slice(0, 70)}${caption.length > 70 ? "…" : ""}`;
+    this.$("#sb-caption-overlay-text").textContent = caption;
+    this.$("#sb-caption-overlay").hidden = false;
   }
 
   setCameraRunning(running) {
@@ -261,12 +269,12 @@ export class SignBridgeHud {
     this.$("#sb-metrics").textContent = `Gemma 4: ${(metrics.totalDurationNs / 1e9).toFixed(2)}s · ${metrics.outputTokens || 0} output tokens`;
   }
 
-  showSignResult({ question, glosses, clipUrl, frameSequences = [], exact, quality, message }) {
+  showSignResult({ question, glosses, clipUrl, vectorSequences = [], exact, quality, message }) {
     const video = this.$("#sb-sign-video");
-    const image = this.$("#sb-sign-image");
+    const avatar = this.$("#sb-sign-avatar");
     const placeholder = this.$("#sb-sign-placeholder");
     this.stopFrameAnimation();
-    this.signFrames = [];
+    this.signVectors = [];
     this.$("#sb-sign-caption").textContent = question;
     const chips = this.$("#sb-sign-glosses");
     chips.replaceChildren(...glosses.map((gloss) => {
@@ -280,27 +288,27 @@ export class SignBridgeHud {
     if (clipUrl) {
       video.src = clipUrl;
       video.hidden = false;
-      image.hidden = true;
+      avatar.hidden = true;
       placeholder.hidden = true;
       video.playbackRate = 1;
       video.play().catch(() => {});
-    } else if (frameSequences.length) {
+    } else if (vectorSequences.length) {
       video.removeAttribute("src");
       video.load();
       video.hidden = true;
-      image.hidden = false;
+      avatar.hidden = false;
       placeholder.hidden = true;
-      this.signFrames = frameSequences.flatMap((sequence) => [
-        ...sequence.frames,
-        ...Array(4).fill(sequence.frames.at(-1))
-      ]).filter(Boolean);
-      this.signFrameRate = frameSequences[0]?.fps || 10;
+      this.signVectors = vectorSequences.flatMap((sequence) => [
+        ...sequence.vectors,
+        ...Array(4).fill(sequence.vectors.at(-1))
+      ]);
+      this.signFrameRate = vectorSequences[0]?.fps || 10;
       this.playFrameAnimation(true);
     } else {
       video.removeAttribute("src");
       video.load();
       video.hidden = true;
-      image.hidden = true;
+      avatar.hidden = true;
       placeholder.hidden = false;
       placeholder.textContent = message || "No verified ISL clip is recorded for this question.";
     }
@@ -311,7 +319,7 @@ export class SignBridgeHud {
     if (!video.hidden && video.src) {
       video.currentTime = 0;
       video.play().catch(() => {});
-    } else if (this.signFrames.length) {
+    } else if (this.signVectors.length) {
       this.playFrameAnimation(true);
     }
   }
@@ -321,7 +329,7 @@ export class SignBridgeHud {
     if (!video.hidden && video.src) {
       video.playbackRate = video.playbackRate === 0.65 ? 1 : 0.65;
       this.signPlaybackRate = video.playbackRate;
-    } else if (this.signFrames.length) {
+    } else if (this.signVectors.length) {
       this.signPlaybackRate = this.signPlaybackRate === 0.65 ? 1 : 0.65;
       this.playFrameAnimation(true);
     }
@@ -330,25 +338,31 @@ export class SignBridgeHud {
 
   playFrameAnimation(reset = false) {
     this.stopFrameAnimation();
-    if (!this.signFrames.length) return;
+    if (!this.signVectors.length) return;
     if (reset) this.signFrameIndex = 0;
-    const image = this.$("#sb-sign-image");
-    const interval = Math.round(1000 / (this.signFrameRate * this.signPlaybackRate));
-    const step = () => {
-      if (this.signFrameIndex >= this.signFrames.length) {
+    const avatar = this.$("#sb-sign-avatar");
+    const context = avatar.getContext("2d");
+    this.signAnimationStartedAt = performance.now() - (this.signFrameIndex / (this.signFrameRate * this.signPlaybackRate)) * 1000;
+    const step = (now) => {
+      const position = ((now - this.signAnimationStartedAt) / 1000) * this.signFrameRate * this.signPlaybackRate;
+      const index = Math.floor(position);
+      if (index >= this.signVectors.length) {
         this.stopFrameAnimation();
         return;
       }
-      image.src = this.signFrames[this.signFrameIndex];
-      this.signFrameIndex += 1;
-      this.signFrameTimer = setTimeout(step, interval);
+      this.signFrameIndex = index;
+      const current = this.signVectors[index];
+      const next = this.signVectors[Math.min(index + 1, this.signVectors.length - 1)];
+      const vector = current ? interpolateVectors(current, next, position - index) : null;
+      drawSigningAvatar(context, vector, avatar.width, avatar.height);
+      this.signAnimationRequest = requestAnimationFrame(step);
     };
-    step();
+    this.signAnimationRequest = requestAnimationFrame(step);
   }
 
   stopFrameAnimation() {
-    if (this.signFrameTimer) clearTimeout(this.signFrameTimer);
-    this.signFrameTimer = null;
+    if (this.signAnimationRequest) cancelAnimationFrame(this.signAnimationRequest);
+    this.signAnimationRequest = null;
   }
 
   setRecording(recording, message) {

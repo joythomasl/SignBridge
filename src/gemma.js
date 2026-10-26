@@ -85,3 +85,30 @@ export function mapQuestionToSign(settings, question, intents, availableClips) {
     ]
   });
 }
+
+export function refineMeetCaption(settings, caption) {
+  const schema = {
+    type: "object",
+    properties: {
+      caption: { type: "string" },
+      is_question: { type: "boolean" }
+    },
+    required: ["caption", "is_question"]
+  };
+  const system = [
+    "You clean one finalized Google Meet caption for accessibility.",
+    "Return JSON only and obey the schema.",
+    "Preserve the exact meaning, names, technologies, numbers, and negation.",
+    "Fix only obvious spacing, casing, punctuation, and unmistakable speech-recognition errors.",
+    "Never add facts or rephrase the sentence. Mark whether it is a question."
+  ].join(" ");
+  return runtimeMessage({
+    type: "GEMMA_CHAT",
+    settings,
+    schema,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: JSON.stringify({ caption }) }
+    ]
+  });
+}

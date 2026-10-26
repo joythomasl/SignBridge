@@ -25,6 +25,26 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   overflow: hidden;
 }
 
+.sb-caption-overlay {
+  position: fixed;
+  z-index: 2147483646;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 48px));
+  padding: 11px 18px 13px;
+  color: #f4fffe;
+  background: rgba(3, 13, 17, .9);
+  border: 1px solid rgba(83, 226, 211, .35);
+  border-radius: 13px;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(12px);
+  text-align: center;
+  pointer-events: none;
+}
+.sb-caption-overlay span { display: block; margin-bottom: 3px; color: #5eead4; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.sb-caption-overlay strong { display: block; font-size: clamp(15px, 2vw, 22px); line-height: 1.35; text-wrap: balance; }
+
 .sb-header {
   display: flex;
   align-items: center;
@@ -121,7 +141,7 @@ button:hover:not(:disabled) { background: #20454c; border-color: rgba(116, 237, 
   background: #061217;
   border: 1px solid rgba(142, 230, 221, .13);
 }
-.sb-camera-stage video, .sb-camera-stage canvas, .sb-sign-stage video, .sb-sign-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.sb-camera-stage video, .sb-camera-stage canvas, .sb-sign-stage video, .sb-sign-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .sb-camera-stage video { transform: scaleX(-1); }
 .sb-live-banner { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(51, 214, 200, .35); border-radius: 10px; background: rgba(51, 214, 200, .08); }
 .sb-live-banner small { color: #9db7ba; font-weight: 400; }
@@ -142,4 +162,5 @@ button:hover:not(:disabled) { background: #20454c; border-color: rgba(116, 237, 
 
 @media (max-width: 600px) {
   .sb-shell { top: 6px; right: 6px; width: calc(100vw - 12px); max-height: calc(100vh - 12px); }
+  .sb-caption-overlay { bottom: 8px; width: calc(100vw - 16px); }
 }

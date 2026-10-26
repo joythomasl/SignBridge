@@ -22,6 +22,12 @@ async function copyStatic() {
       { recursive: true }
     )
   ]);
+  await Promise.all([
+    rm(path.join(dist, "assets", "signs", "library"), { recursive: true, force: true }),
+    rm(path.join(dist, "assets", "signs", "fingerspelling"), { recursive: true, force: true }),
+    rm(path.join(dist, "assets", "signs", "fingerspelling-templates.json"), { force: true }),
+    rm(path.join(dist, "assets", "signs", "fingerspelling.json"), { force: true })
+  ]);
 }
 
 async function makeBuildOptions() {
@@ -36,7 +42,7 @@ async function makeBuildOptions() {
     outdir: dist,
     format: "iife",
     target: "chrome120",
-    sourcemap: true,
+    sourcemap: false,
     logLevel: "info"
   };
 }

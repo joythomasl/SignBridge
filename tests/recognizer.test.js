@@ -11,6 +11,7 @@ import {
   findBestSequenceMatch,
   landmarksToVector
 } from "../src/recognizer.js";
+import { decodeLandmarkVector, interpolateVectors } from "../src/avatar-renderer.js";
 
 test("averageVectors computes a component-wise average", () => {
   assert.deepEqual(averageVectors([[1, 2], [3, 4]]), [2, 3]);
@@ -71,6 +72,25 @@ test("classifyLandmarkVector returns the confident trained class", () => {
   assert.ok(match.score > 0.99);
 });
 
+test("classifyLandmarkVector runs an exported MLP", () => {
+  const match = classifyLandmarkVector([2, 0], {
+    type: "mlp-landmark-classifier",
+    featureCount: 2,
+    classes: ["A", "B"],
+    mean: [0, 0],
+    scale: [1, 1],
+    weights: [
+      [[1, -1], [0, 0]],
+      [[2, -2], [-2, 2]]
+    ],
+    biases: [[0, 0], [0, 0]],
+    confidenceThreshold: 0.58,
+    marginThreshold: 0.12
+  });
+  assert.equal(match.gloss, "A");
+  assert.ok(match.score > 0.99);
+});
+
 test("PoseStabilityGate suppresses transitions and returns a settled average", () => {
   const gate = new PoseStabilityGate({ windowMs: 400, minFrames: 5, maxAverageMotion: 0.04, maxPeakMotion: 0.11 });
   for (let index = 0; index < 6; index += 1) {
@@ -79,6 +99,15 @@ test("PoseStabilityGate suppresses transitions and returns a settled average", (
   let stable = null;
   for (let index = 6; index < 13; index += 1) stable = gate.update([1, 0], index * 80);
   assert.deepEqual(stable, [1, 0]);
+});
+
+test("avatar helpers decode hand slots and interpolate animation frames", () => {
+  const vector = new Array(134).fill(0);
+  vector[63 + 3] = 1;
+  const decoded = decodeLandmarkVector(vector);
+  assert.equal(decoded.left, null);
+  assert.equal(decoded.right[1].x, 1);
+  assert.deepEqual(interpolateVectors([0, 2], [2, 4], 0.5), [1, 3]);
 });
 
 test("StableGestureDetector accepts only after the hold duration", () => {
