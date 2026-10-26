@@ -6,7 +6,9 @@ export const DEFAULT_SETTINGS = {
   detectionHoldMs: 500,
   detectionCooldownMs: 900,
   inferenceFps: 15,
-  speechRate: 0.95
+  speechRate: 0.95,
+  liveSignToAudio: false,
+  livePauseMs: 1200
 };
 
 export const DEMO_GLOSSES = [

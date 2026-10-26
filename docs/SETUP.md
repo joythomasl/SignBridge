@@ -46,7 +46,8 @@ Allowing all Chrome extensions is suitable only for the hackathon demo. After th
 4. Start the SignBridge camera.
 5. Calibrate only the 8–12 signs used in the scripted demo.
 6. Select **Check Gemma** and verify the green ready status.
-7. Rehearse both scripted question/answer paths three times.
+7. Enable **Live sign → audio** for automatic phrase delivery, or leave it off for review-first mode.
+8. Rehearse both scripted question/answer paths three times.
 
 The recorded phrase clips and gesture templates remain in local browser storage. They are not included in the source tree.
 
@@ -63,4 +64,5 @@ For a low-spec laptop, set the endpoint to an HTTPS Ollama-compatible Gemma 4 ga
 - **Model missing:** Run the `ollama pull` command above.
 - **Slow inference:** Close other GPU-heavy apps, keep the model warm, and keep prompts text-only.
 - **Gesture repeats:** Hold the sign once, then return to a neutral pose during the cooldown.
+- **Live audio starts too early:** Keep transitions between signs under one second or increase `livePauseMs` in the saved settings.
 - **Wrong gesture:** Recalibrate under the same camera angle and lighting used for the demo.

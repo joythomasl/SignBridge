@@ -66,11 +66,11 @@ try {
 
   const glossSelect = panel.locator("#sb-calibration-gloss");
   const addGloss = panel.locator("#sb-add-gloss");
+  await panel.locator("#sb-live-audio").check();
   for (const gloss of ["ME", "PYTHON", "AI", "PROJECT", "THREE", "YEAR"]) {
     await glossSelect.selectOption(gloss);
     await addGloss.click();
   }
-  await panel.locator("#sb-generate-answer").click();
   const answer = panel.locator("#sb-answer");
   await page.waitForFunction(() => {
     const host = document.querySelector("#signbridge-root");

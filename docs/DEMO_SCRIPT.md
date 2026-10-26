@@ -14,12 +14,11 @@
 1. Interviewer: “Tell me about your experience with Python and AI projects.”
 2. Select **Use latest caption**, then **Show in ISL**.
 3. Point out that Gemma 4 selected a supported question intent and that the full verified ISL phrase—not an invented animation—is playing.
-4. Candidate signs the calibrated sequence: `ME`, `PYTHON`, `AI`, `PROJECT`, `THREE`, `YEAR`.
-5. Select **Finish & generate**.
-6. Read the generated answer and show that the candidate can edit it.
-7. Check the approval box.
-8. Select **Insert in Meet chat**, then send it manually in Meet.
-9. Optionally select **Speak** to demonstrate local TTS.
+4. Enable **Live sign → audio**.
+5. Candidate signs the calibrated sequence: `ME`, `PYTHON`, `AI`, `PROJECT`, `THREE`, `YEAR`.
+6. Pause briefly; Gemma renders the phrase and TTS speaks it automatically without pressing Finish.
+7. Show the generated text and explain that review-first mode remains available when Live mode is off.
+8. Optionally disable Live mode, approve the text, and insert the draft into Meet chat.
 
 ## Failure-safe line
 

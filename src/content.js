@@ -27,6 +27,8 @@ async function boot() {
   let recordingChunks = [];
   let recordingIntent = null;
   let signClipUrl = null;
+  let liveTimer = null;
+  let liveGenerating = false;
 
   const hud = new SignBridgeHud({
     startCamera,
@@ -46,7 +48,8 @@ async function boot() {
     slowerSign: () => hud.slowerSign(),
     recordClip,
     stopRecording,
-    deleteClip: handleDeleteClip
+    deleteClip: handleDeleteClip,
+    toggleLiveMode: handleToggleLiveMode
   }, candidateVocabulary);
   hud.setSettings(settings);
   hud.renderGlosses(glossBuffer, removeGloss);
@@ -55,12 +58,16 @@ async function boot() {
     threshold: settings.detectionThreshold,
     holdMs: settings.detectionHoldMs,
     cooldownMs: settings.detectionCooldownMs,
-    onCandidate: (match) => hud.setDetected(match),
+    onCandidate: (match) => {
+      hud.setDetected(match);
+      if (match?.gloss) scheduleLiveGeneration();
+    },
     onAccept: ({ gloss }) => {
       if (!gloss) return;
       glossBuffer.push(gloss);
       hud.renderGlosses(glossBuffer, removeGloss);
       hud.setStatus(`Sign accepted: ${gloss}`, "success");
+      scheduleLiveGeneration();
     }
   });
 
@@ -112,6 +119,7 @@ async function boot() {
   }
 
   function stopCamera() {
+    cancelLiveTimer();
     if (mediaRecorder?.state === "recording") mediaRecorder.stop();
     vision.stop();
     hud.setCameraRunning(false);
@@ -151,6 +159,7 @@ async function boot() {
   function removeGloss(index) {
     glossBuffer.splice(index, 1);
     hud.renderGlosses(glossBuffer, removeGloss);
+    scheduleLiveGeneration();
   }
 
   function addGloss() {
@@ -158,9 +167,11 @@ async function boot() {
     glossBuffer.push(gloss);
     hud.renderGlosses(glossBuffer, removeGloss);
     hud.setStatus(`Added ${gloss} manually.`, "success");
+    scheduleLiveGeneration();
   }
 
   function clearGlosses() {
+    cancelLiveTimer();
     glossBuffer = [];
     detector.reset();
     hud.renderGlosses(glossBuffer, removeGloss);
@@ -177,20 +188,93 @@ async function boot() {
       hud.setStatus("Sign or add at least one calibrated gloss first.", "warn");
       return;
     }
-    hud.setStatus("Gemma 4 is rendering the signed meaning…", "info");
+    await generateFromGlosses(question, [...glossBuffer], false);
+  }
+
+  async function generateFromGlosses(question, glosses, live) {
+    hud.setStatus(live ? "Live mode: translating the signed phrase…" : "Gemma 4 is rendering the signed meaning…", "info");
     try {
-      const response = await generateAnswer(settings, question, glossBuffer);
+      const response = await generateAnswer(settings, question, glosses);
       const result = response.result || {};
       const answer = String(result.answer || "").trim();
       if (!answer) throw new Error("Gemma returned an empty answer");
       hud.setAnswer(answer, Boolean(result.needs_clarification));
       hud.setMetrics(response.metrics);
-      if (!result.needs_clarification) hud.setStatus("Answer ready. Review and approve it before delivery.", "success");
+      if (live && !result.needs_clarification) {
+        speakText(answer);
+        removeProcessedGlosses(glosses);
+        hud.setLiveState("Spoken — listening for the next phrase", true);
+        hud.setStatus("Live sign-to-audio response spoken. Listening continues.", "success");
+      } else if (live) {
+        hud.setLiveState("Clarification needed — nothing was spoken", true);
+      } else if (!result.needs_clarification) {
+        hud.setStatus("Answer ready. Review and approve it before delivery.", "success");
+      }
     } catch (error) {
-      const literal = `My response is: ${glossBuffer.join(" ").toLowerCase()}.`;
+      const literal = `My response is: ${glosses.join(" ").toLowerCase()}.`;
       hud.setAnswer(literal, true);
       hud.setMetrics(null);
-      hud.setStatus(`Gemma unavailable (${error.message}). Showing a literal fallback.`, "warn");
+      if (live) {
+        hud.setLiveState("Live translation failed — nothing was spoken", true);
+        hud.setStatus(`Live Gemma unavailable (${error.message}). Nothing was spoken automatically.`, "warn");
+      } else {
+        hud.setStatus(`Gemma unavailable (${error.message}). Showing a literal fallback.`, "warn");
+      }
+    }
+  }
+
+  function scheduleLiveGeneration() {
+    if (!hud.isLiveMode() || !glossBuffer.length) return;
+    cancelLiveTimer();
+    hud.setLiveState("Signing detected — pause briefly to speak", true);
+    liveTimer = setTimeout(flushLivePhrase, settings.livePauseMs || 1200);
+  }
+
+  async function flushLivePhrase() {
+    liveTimer = null;
+    if (!hud.isLiveMode() || !glossBuffer.length) return;
+    if (liveGenerating) {
+      scheduleLiveGeneration();
+      return;
+    }
+    const question = hud.getQuestion();
+    if (!question) {
+      hud.setLiveState("Add or capture the interviewer question first", true);
+      hud.setStatus("Live audio needs the interviewer’s question for context.", "warn");
+      return;
+    }
+    const phrase = [...glossBuffer];
+    liveGenerating = true;
+    try {
+      await generateFromGlosses(question, phrase, true);
+    } finally {
+      liveGenerating = false;
+      if (glossBuffer.length) scheduleLiveGeneration();
+    }
+  }
+
+  function removeProcessedGlosses(processed) {
+    const samePrefix = processed.every((gloss, index) => glossBuffer[index] === gloss);
+    if (samePrefix) glossBuffer.splice(0, processed.length);
+    hud.renderGlosses(glossBuffer, removeGloss);
+  }
+
+  function cancelLiveTimer() {
+    if (liveTimer) clearTimeout(liveTimer);
+    liveTimer = null;
+  }
+
+  async function handleToggleLiveMode(enabled) {
+    settings = await saveSettings({ ...settings, liveSignToAudio: enabled });
+    if (enabled) {
+      hud.setLiveState("Live audio ready — pause briefly to speak", true);
+      hud.setStatus("Live sign-to-audio enabled. Recognized phrases will be spoken automatically.", "success");
+      scheduleLiveGeneration();
+    } else {
+      cancelLiveTimer();
+      speechSynthesis.cancel();
+      hud.setLiveState("Live audio is off", false);
+      hud.setStatus("Live sign-to-audio disabled.", "info");
     }
   }
 
@@ -260,12 +344,16 @@ async function boot() {
   function speak() {
     const answer = hud.getAnswer();
     if (!answer) return;
+    speakText(answer);
+    hud.setStatus("Speaking approved answer locally.", "success");
+  }
+
+  function speakText(text) {
     speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(answer);
+    const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-IN";
     utterance.rate = settings.speechRate;
     speechSynthesis.speak(utterance);
-    hud.setStatus("Speaking approved answer locally.", "success");
   }
 
   async function copy() {

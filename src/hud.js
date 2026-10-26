@@ -91,6 +91,11 @@ export class SignBridgeHud {
             </div>
             <button id="sb-add-gloss" class="sb-full-button">Add selected gloss manually</button>
             <div id="sb-calibration-state" class="sb-muted">Calibrate the signs used in your demo.</div>
+            <label class="sb-check sb-live-toggle">
+              <input id="sb-live-audio" type="checkbox">
+              <span><strong>Live sign → audio</strong><small> Speaks automatically after a short signing pause</small></span>
+            </label>
+            <div id="sb-live-state" class="sb-muted">Live audio is off</div>
             <div id="sb-gloss-buffer" class="sb-chips sb-buffer"></div>
             <div class="sb-row">
               <button id="sb-clear-glosses">Clear</button>
@@ -153,6 +158,7 @@ export class SignBridgeHud {
       this.$(selector).addEventListener("click", () => this.handlers[handler]?.());
     }
     this.$("#sb-approved").addEventListener("change", (event) => this.setApproved(event.target.checked));
+    this.$("#sb-live-audio").addEventListener("change", (event) => this.handlers.toggleLiveMode?.(event.target.checked));
     this.$("#sb-answer").addEventListener("input", () => {
       this.$("#sb-approved").checked = false;
       this.setApproved(false);
@@ -170,6 +176,7 @@ export class SignBridgeHud {
   getAnswer() { return this.$("#sb-answer").value.trim(); }
   getCalibrationGloss() { return this.$("#sb-calibration-gloss").value; }
   getClipIntent() { return this.$("#sb-clip-intent").value; }
+  isLiveMode() { return this.$("#sb-live-audio").checked; }
 
   getSettingsForm() {
     return {
@@ -183,6 +190,8 @@ export class SignBridgeHud {
     this.$("#sb-endpoint").value = settings.endpoint || "";
     this.$("#sb-model").value = settings.model || "";
     this.$("#sb-api-key").value = settings.apiKey || "";
+    this.$("#sb-live-audio").checked = Boolean(settings.liveSignToAudio);
+    this.setLiveState(settings.liveSignToAudio ? "Live audio ready — pause briefly to speak" : "Live audio is off", settings.liveSignToAudio);
     this.$("#sb-mode-badge").textContent = settings.endpoint?.includes("localhost") || settings.endpoint?.includes("127.0.0.1") ? "Gemma 4 local" : "Gemma 4 network";
   }
 
@@ -204,6 +213,12 @@ export class SignBridgeHud {
   setCameraRunning(running) {
     this.$("#sb-start-camera").disabled = running;
     this.$("#sb-stop-camera").disabled = !running;
+  }
+
+  setLiveState(message, active = this.isLiveMode()) {
+    const state = this.$("#sb-live-state");
+    state.textContent = message;
+    state.dataset.active = String(Boolean(active));
   }
 
   setDetected(match) {
