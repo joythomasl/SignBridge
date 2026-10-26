@@ -4,6 +4,7 @@ import {
   StableGestureDetector,
   TemporalGestureDetector,
   averageVectors,
+  classifyLandmarkVector,
   cosineSimilarity,
   findBestMatch,
   findBestSequenceMatch,
@@ -38,7 +39,7 @@ test("landmarksToVector has a fixed two-hand vector length", () => {
     landmarks: [landmarks],
     handedness: [[{ categoryName: "Right" }]]
   });
-  assert.equal(vector.length, 126);
+  assert.equal(vector.length, 134);
   assert.ok(vector.some((value) => value !== 0));
 });
 
@@ -52,6 +53,21 @@ test("landmarksToVector canonicalizes a one-hand sign across handedness", () => 
   const right = landmarksToVector({ landmarks: [landmarks], handedness: [[{ categoryName: "Right" }]] });
   const left = landmarksToVector({ landmarks: [mirrored], handedness: [[{ categoryName: "Left" }]] });
   assert.ok(cosineSimilarity(right, left) > 0.999);
+});
+
+test("classifyLandmarkVector returns the confident trained class", () => {
+  const match = classifyLandmarkVector([2, 0], {
+    featureCount: 2,
+    classes: ["A", "B"],
+    mean: [0, 0],
+    scale: [1, 1],
+    coef: [[2, 0], [-2, 0]],
+    intercept: [0, 0],
+    confidenceThreshold: 0.58,
+    marginThreshold: 0.12
+  });
+  assert.equal(match.gloss, "A");
+  assert.ok(match.score > 0.99);
 });
 
 test("StableGestureDetector accepts only after the hold duration", () => {

@@ -13,6 +13,7 @@ async function copyStatic() {
     cp(path.join(root, "manifest.json"), path.join(dist, "manifest.json")),
     cp(path.join(root, "src", "hud.css"), path.join(dist, "hud.css")),
     cp(path.join(root, "src", "vision.html"), path.join(dist, "vision.html")),
+    cp(path.join(root, "src", "extractor.html"), path.join(dist, "extractor.html")),
     cp(path.join(root, "assets"), path.join(dist, "assets"), { recursive: true }),
     cp(path.join(root, "vendor", "hand_landmarker.task"), path.join(dist, "models", "hand_landmarker.task")),
     cp(
@@ -28,7 +29,8 @@ async function makeBuildOptions() {
     entryPoints: {
       content: path.join(root, "src", "content.js"),
       background: path.join(root, "src", "background.js"),
-      "vision-frame": path.join(root, "src", "vision-frame.js")
+      "vision-frame": path.join(root, "src", "vision-frame.js"),
+      "extractor-frame": path.join(root, "src", "extractor-frame.js")
     },
     bundle: true,
     outdir: dist,

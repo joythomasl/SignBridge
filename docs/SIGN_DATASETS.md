@@ -3,15 +3,17 @@
 SignBridge has two distinct vocabularies:
 
 - **Interviewer → candidate playback:** bundled image sequences or signer-recorded videos.
-- **Candidate → interviewer recognition:** calibrated MediaPipe landmark templates. Importing playback frames does not automatically make dynamic signs recognizable from a new signer.
+- **Candidate → interviewer recognition:** a trained static alphabet classifier, temporal word templates, and optional user calibrations. Importing playback frames alone does not retrain recognition.
 
 ## Current bundled library
 
 The imported everyday-ISL archive contributes 44 labels with 40 frames per label. Those sequences now serve both animation playback and a 12-keyframe temporal landmark recognizer. The build contains compressed WebP frames and generated templates, not the original 336 MB archive.
 
-The alphabet archive contributes 35 representative `A–Z` and `1–9` signs. SignBridge uses them as an immediate fingerspelling fallback so every detected question has a visual path while Gemma selects any better phrase or word clips.
+The alphabet archive contributes 35 `A–Z` and `1–9` signs. SignBridge uses representative frames for playback and thousands of images for candidate-side recognition.
 
-MediaPipe successfully produced built-in candidate-recognition templates for 32 of those signs. The representative `H`, `Q`, and `S` images did not yield hand landmarks and are therefore playback-only until better samples are imported or the signs are calibrated manually.
+The bundled classifier was trained from 4,120 detected landmark samples across all 35 labels. Each hand is translated and scaled relative to its wrist while preserving wrist/palm orientation; left-handed observations are mirrored into the same canonical space. The model also keeps hand-presence and two-hand positional features. A held-out split from the same archive reached 99.78% accuracy, with 96.0% recall for `O`, 96.3% for `G`, and 100% for the remaining classes. Confidence and class-margin thresholds reject uncertain poses as **unknown sign**.
+
+This validation split shares the source dataset and signer conditions with training, so it is a pipeline check rather than proof of signer-independent accuracy. For a stronger evaluation, collect a separate signer/camera test set and keep it entirely out of training.
 
 The dataset did not include license metadata. Keep the assets local to the hackathon until reuse and redistribution permission is confirmed. The labels and sign accuracy must also be reviewed by a knowledgeable ISL signer.
 
@@ -41,9 +43,12 @@ For an alphanumeric dataset organized as `A/image.jpg`, `B/image.jpg`, and so on
 ```powershell
 npm run import:fingerspelling -- "C:\path\to\alphabet-dataset.zip"
 npm run build
-npm run build:fingerspelling-templates
+npm run extract:alphabet-features -- "C:\path\to\alphabet-dataset.zip" 120
+npm run train:alphabet
 npm run build
 ```
+
+The optional final number is the maximum sampled images per class. Landmark samples are written under ignored `artifacts/`; only the compact trained model in `assets/signs/alphabet-model.json` is bundled.
 
 The importer:
 

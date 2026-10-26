@@ -1,24 +1,20 @@
 const HAND_VECTOR_SIZE = 21 * 3;
-
 function normalizeHand(landmarks, mirrorX = false) {
   if (!landmarks || landmarks.length !== 21) return new Array(HAND_VECTOR_SIZE).fill(0);
 
   const wrist = landmarks[0];
   const middleMcp = landmarks[9];
   const direction = mirrorX ? -1 : 1;
-  const rawDx = (middleMcp.x - wrist.x) * direction;
+  const rawDx = middleMcp.x - wrist.x;
   const rawDy = middleMcp.y - wrist.y;
   const scale = Math.max(Math.hypot(rawDx, rawDy, middleMcp.z - wrist.z), 1e-5);
-  const rotation = Math.atan2(rawDy, rawDx) - Math.PI / 2;
-  const cos = Math.cos(-rotation);
-  const sin = Math.sin(-rotation);
   const vector = [];
 
   for (const point of landmarks) {
     const x = ((point.x - wrist.x) / scale) * direction;
     const y = (point.y - wrist.y) / scale;
     const z = (point.z - wrist.z) / scale;
-    vector.push(x * cos - y * sin, x * sin + y * cos, z);
+    vector.push(x, y, z);
   }
   return vector;
 }
@@ -32,15 +28,64 @@ export function landmarksToVector(result) {
   if (result?.landmarks?.length === 1) {
     const handedness = result?.handedness?.[0]?.[0]?.categoryName || "Right";
     slots.Right = normalizeHand(result.landmarks[0], handedness === "Left");
-    return [...slots.Left, ...slots.Right];
+    return [...slots.Left, ...slots.Right, 0, 1, 0, 0, 0, 0, 0, 0];
   }
 
+  const rawHands = {};
   (result?.landmarks || []).forEach((landmarks, index) => {
     const handedness = result?.handedness?.[index]?.[0]?.categoryName || (index === 0 ? "Right" : "Left");
     slots[handedness] = normalizeHand(landmarks, handedness === "Left");
+    rawHands[handedness] = landmarks;
   });
 
-  return [...slots.Left, ...slots.Right];
+  const left = rawHands.Left;
+  const right = rawHands.Right;
+  let relation = [Number(Boolean(left)), Number(Boolean(right)), 0, 0, 0, 0, 0, 0];
+  if (left && right) {
+    const leftScale = Math.max(Math.hypot(left[9].x - left[0].x, left[9].y - left[0].y, left[9].z - left[0].z), 1e-5);
+    const rightScale = Math.max(Math.hypot(right[9].x - right[0].x, right[9].y - right[0].y, right[9].z - right[0].z), 1e-5);
+    const scale = (leftScale + rightScale) / 2;
+    const dx = (right[0].x - left[0].x) / scale;
+    const dy = (right[0].y - left[0].y) / scale;
+    const dz = (right[0].z - left[0].z) / scale;
+    relation = [1, 1, dx, dy, dz, Math.hypot(dx, dy, dz), (left[0].x + right[0].x) / 2, (left[0].y + right[0].y) / 2];
+  }
+  return [...slots.Left, ...slots.Right, ...relation];
+}
+
+export function classifyLandmarkVector(vector, model) {
+  if (!model?.classes?.length || !model?.coef?.length || vector.length !== model.featureCount) {
+    return { gloss: null, score: 0, margin: 0, source: "trained-alphabet-model" };
+  }
+  const standardized = vector.map((value, index) => (value - model.mean[index]) / (model.scale[index] || 1));
+  const logits = model.coef.map((weights, classIndex) => {
+    let value = model.intercept[classIndex] || 0;
+    for (let index = 0; index < standardized.length; index += 1) value += weights[index] * standardized[index];
+    return value;
+  });
+  const maximum = Math.max(...logits);
+  const probabilities = logits.map((value) => Math.exp(value - maximum));
+  const total = probabilities.reduce((sum, value) => sum + value, 0) || 1;
+  const ranked = probabilities.map((value, index) => ({ index, probability: value / total })).sort((a, b) => b.probability - a.probability);
+  const best = ranked[0];
+  const margin = best.probability - (ranked[1]?.probability || 0);
+  const centroid = model.centroids?.[best.index];
+  const distance = centroid?.length === standardized.length
+    ? Math.sqrt(standardized.reduce((sum, value, index) => sum + (value - centroid[index]) ** 2, 0) / standardized.length)
+    : 0;
+  const distanceThreshold = model.distanceThresholds?.[best.index] ?? Number.POSITIVE_INFINITY;
+  const accepted = best.probability >= (model.confidenceThreshold || 0.58)
+    && margin >= (model.marginThreshold || 0.12)
+    && distance <= distanceThreshold;
+  return {
+    gloss: accepted ? model.classes[best.index] : null,
+    score: best.probability,
+    margin,
+    distance,
+    distanceThreshold,
+    threshold: model.confidenceThreshold || 0.58,
+    source: "trained-alphabet-model"
+  };
 }
 
 export function averageVectors(vectors) {

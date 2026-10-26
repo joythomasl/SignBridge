@@ -4,7 +4,7 @@ A 24-hour hackathon prototype that adds a candidate-controlled, bidirectional IS
 
 ## What works
 
-- Recognize 44 bundled temporal word/phrase motions and 32 dataset-derived fingerspelling signs.
+- Recognize 44 bundled temporal word/phrase motions and all 35 `A–Z`/`1–9` classes with a trained landmark classifier.
 - Automatically detect stabilized Meet questions, retain manual text as a fallback, and start visual translation without a button.
 - Generate a constrained answer with local Gemma 4.
 - Translate and speak signed phrases automatically after a 1.2-second signing pause.
@@ -30,7 +30,7 @@ npm run smoke:ollama
 npm run smoke:browser
 ```
 
-Load the `dist` directory from `chrome://extensions` using **Load unpacked**, then open Google Meet. For transfer to another laptop, extract `signbridge-extension-0.2.0.zip` first and load the extracted folder.
+Load the `dist` directory from `chrome://extensions` using **Load unpacked**, then open Google Meet. For transfer to another laptop, extract `signbridge-extension-0.3.0.zip` first and load the extracted folder.
 
 See [setup](docs/SETUP.md), [measured benchmark](docs/BENCHMARK.md), [demo script](docs/DEMO_SCRIPT.md), and the [24-hour plan](HACKATHON_24H_PLAN.md).
 
@@ -49,7 +49,7 @@ The importer accepts `label/frame.png` or `label/frame.jpg`, including a ZIP nes
 
 Live mode is always enabled. SignBridge continuously accumulates recognized glosses; after a short neutral pause, Gemma 4 renders the phrase and browser TTS speaks it automatically. The extension then clears only the processed glosses and continues listening. Meet questions automatically start exact phrase, word-sequence, or fingerspelling animation. Automatic chat sending remains disabled.
 
-The camera label distinguishes **No hand** from **Hand tracked · unknown sign**. Built-in temporal recognition covers the 44 supplied everyday words and phrases. Fingerspelling covers the 32 alphabet/digit poses for which MediaPipe found a hand; `H`, `Q`, and `S` still require better reference frames or custom calibration. The word dataset contains approximately one recorded sequence per label, so performance across different signers and camera angles remains experimental.
+The camera label distinguishes **No hand** from **Hand tracked · unknown sign**. Built-in temporal recognition covers the 44 supplied everyday words and phrases. A multinomial landmark classifier covers all 35 alphabet/digit labels and rejects low-confidence or ambiguous poses. It was trained on 4,120 MediaPipe-detected samples and reached 99.78% on a held-out split from the supplied dataset. Because that split is from the same source dataset, it does not measure signer-independent accuracy. The word dataset also contains approximately one recorded sequence per label, so performance across different signers and camera angles remains experimental.
 
 ## Important limitation
 

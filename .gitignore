@@ -4,6 +4,7 @@ dist/
 .chrome-smoke-profile/
 .chrome-template-profile/
 .chrome-word-template-profile/
+.chrome-alphabet-training-profile/
 artifacts/
 dataset-inspect/
 dataset-preview/

@@ -1,7 +1,7 @@
 import { VisionController } from "./vision.js";
 import { SignBridgeHud } from "./hud.js";
 import { MeetAdapter } from "./meet-adapter.js";
-import { StableGestureDetector, TemporalGestureDetector, averageVectors, findBestMatch } from "./recognizer.js";
+import { StableGestureDetector, TemporalGestureDetector, averageVectors, classifyLandmarkVector, findBestMatch } from "./recognizer.js";
 import { checkGemma, generateAnswer, mapQuestionToSign } from "./gemma.js";
 import { getSettings, getTemplates, saveSettings, saveTemplate } from "./storage.js";
 import { deleteClip, getClip, listClips, saveClip } from "./clip-store.js";
@@ -13,9 +13,9 @@ if (!document.getElementById("signbridge-root")) {
 
 async function boot() {
   let settings = await getSettings();
-  const builtInTemplates = await loadBuiltInRecognitionTemplates();
+  const alphabetModel = await loadAlphabetModel();
   const wordTemplates = await loadBuiltInWordTemplates();
-  let templates = { ...builtInTemplates, ...(await getTemplates()) };
+  let templates = await getTemplates();
   const signLibrary = await loadBundledSignLibrary();
   const fingerspellingLibrary = await loadFingerspellingLibrary();
   const signClipsById = new Map(signLibrary.clips.map((clip) => [clip.id, clip]));
@@ -112,7 +112,12 @@ async function boot() {
         return;
       }
       if (mediaRecorder?.state === "recording") return;
-      const match = { ...findBestMatch(vector, templates), handPresent: true };
+      const calibratedMatch = findBestMatch(vector, templates);
+      const trainedMatch = classifyLandmarkVector(vector, alphabetModel);
+      const match = calibratedMatch.gloss && calibratedMatch.score >= settings.detectionThreshold
+        ? calibratedMatch
+        : trainedMatch;
+      match.handPresent = true;
       detector.update(match);
       wordDetector.update(vector);
     },
@@ -142,8 +147,8 @@ async function boot() {
       hud.setStatus("Starting camera and MediaPipe…", "info");
       await vision.start();
       hud.setCameraRunning(true);
-      const calibratedCount = Object.keys(templates).length - Object.keys(builtInTemplates).length;
-      hud.setStatus(`Camera ready. ${Object.keys(wordTemplates).length} words · ${Object.keys(builtInTemplates).length} fingerspelling signs loaded${calibratedCount > 0 ? ` · ${calibratedCount} custom calibrations` : ""}.`, "success");
+      const calibratedCount = Object.keys(templates).length;
+      hud.setStatus(`Camera ready. ${Object.keys(wordTemplates).length} words · ${alphabetModel.classes?.length || 0} trained letters/digits loaded${calibratedCount > 0 ? ` · ${calibratedCount} custom calibrations` : ""}.`, "success");
     } catch (error) {
       hud.setCameraRunning(false);
       hud.setStatus(`Camera unavailable: ${error.message}`, "error");
@@ -184,7 +189,7 @@ async function boot() {
       return;
     }
     const vector = averageVectors(completed.samples);
-    templates = { ...builtInTemplates, ...(await saveTemplate(gloss, vector)) };
+    templates = await saveTemplate(gloss, vector);
     detector.reset();
     wordDetector.reset();
     hud.setCalibrationState(`${gloss} calibrated from ${completed.samples.length} frames.`);
@@ -606,15 +611,15 @@ async function loadFingerspellingLibrary() {
   }
 }
 
-async function loadBuiltInRecognitionTemplates() {
+async function loadAlphabetModel() {
   try {
-    const response = await fetch(chrome.runtime.getURL("assets/signs/fingerspelling-templates.json"));
+    const response = await fetch(chrome.runtime.getURL("assets/signs/alphabet-model.json"));
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const manifest = await response.json();
-    return manifest.templates && typeof manifest.templates === "object" ? manifest.templates : {};
+    const model = await response.json();
+    return model.classes && Array.isArray(model.classes) ? model : { classes: [] };
   } catch (error) {
-    console.warn("SignBridge recognition templates unavailable", error);
-    return {};
+    console.warn("SignBridge trained alphabet model unavailable", error);
+    return { classes: [] };
   }
 }
 
