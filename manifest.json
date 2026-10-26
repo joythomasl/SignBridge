@@ -36,6 +36,7 @@
         "vision-frame.js",
         "assets/signs/*",
         "assets/signs/library/*/*",
+        "assets/signs/fingerspelling/*",
         "hud.css"
       ],
       "matches": ["https://meet.google.com/*"]

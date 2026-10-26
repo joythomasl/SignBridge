@@ -27,6 +27,14 @@ function headersFor(settings) {
   return headers;
 }
 
+let gemmaQueue = Promise.resolve();
+
+function enqueueGemma(operation) {
+  const result = gemmaQueue.then(operation, operation);
+  gemmaQueue = result.catch(() => {});
+  return result;
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message?.type?.startsWith("GEMMA_")) return false;
 
@@ -48,41 +56,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message.type === "GEMMA_CHAT") {
-      const body = {
-        model: settings.model,
-        messages: message.messages,
-        stream: false,
-        think: false,
-        format: message.schema,
-        keep_alive: "30m",
-        options: {
-          num_predict: 96,
-          temperature: 0.2,
-          top_p: 0.9
+      return enqueueGemma(async () => {
+        const body = {
+          model: settings.model,
+          messages: message.messages,
+          stream: false,
+          think: false,
+          format: message.schema,
+          keep_alive: "30m",
+          options: {
+            num_predict: 96,
+            temperature: 0.2,
+            top_p: 0.9
+          }
+        };
+        const response = await requestJson(`${endpoint}/api/chat`, {
+          method: "POST",
+          headers: headersFor(settings),
+          body: JSON.stringify(body)
+        }, 30000);
+        const content = response?.message?.content;
+        if (!content) throw new Error("Gemma returned an empty response");
+        let parsed;
+        try {
+          parsed = JSON.parse(content);
+        } catch {
+          throw new Error("Gemma returned invalid JSON");
         }
-      };
-      const response = await requestJson(`${endpoint}/api/chat`, {
-        method: "POST",
-        headers: headersFor(settings),
-        body: JSON.stringify(body)
-      }, 30000);
-      const content = response?.message?.content;
-      if (!content) throw new Error("Gemma returned an empty response");
-      let parsed;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        throw new Error("Gemma returned invalid JSON");
-      }
-      return {
-        result: parsed,
-        metrics: {
-          totalDurationNs: response.total_duration,
-          loadDurationNs: response.load_duration,
-          promptTokens: response.prompt_eval_count,
-          outputTokens: response.eval_count
-        }
-      };
+        return {
+          result: parsed,
+          metrics: {
+            totalDurationNs: response.total_duration,
+            loadDurationNs: response.load_duration,
+            promptTokens: response.prompt_eval_count,
+            outputTokens: response.eval_count
+          }
+        };
+      });
     }
 
     throw new Error("Unsupported Gemma request");

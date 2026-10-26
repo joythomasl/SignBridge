@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "import:signs": "node scripts/import-sign-dataset.mjs",
+    "import:fingerspelling": "node scripts/import-fingerspelling-dataset.mjs",
     "ollama:serve": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-ollama.ps1",
     "smoke:browser": "node scripts/smoke-browser.mjs",
     "smoke:ollama": "node scripts/smoke-ollama.mjs",

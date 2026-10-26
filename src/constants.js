@@ -7,7 +7,6 @@ export const DEFAULT_SETTINGS = {
   detectionCooldownMs: 900,
   inferenceFps: 15,
   speechRate: 0.95,
-  liveSignToAudio: false,
   livePauseMs: 1200
 };
 

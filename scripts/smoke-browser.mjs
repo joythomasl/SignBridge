@@ -48,7 +48,6 @@ try {
 
   const reverseQuestion = "How are you?";
   await panel.locator("#sb-question").fill(reverseQuestion);
-  await panel.locator("#sb-translate-sign").click();
   await panel.locator("#sb-sign-caption").filter({ hasText: reverseQuestion }).waitFor({ timeout: 15000 });
   await panel.locator("#sb-sign-quality").filter({ hasText: "Dataset phrase clip" }).waitFor({ timeout: 15000 });
   await page.waitForFunction(() => {
@@ -64,9 +63,9 @@ try {
   const question = "Please explain a project you worked on.";
   await panel.locator("#sb-question").fill(question);
 
+  await panel.locator("details").filter({ hasText: "Recognition setup and fallback" }).locator("summary").click();
   const glossSelect = panel.locator("#sb-calibration-gloss");
   const addGloss = panel.locator("#sb-add-gloss");
-  await panel.locator("#sb-live-audio").check();
   for (const gloss of ["ME", "PYTHON", "AI", "PROJECT", "THREE", "YEAR"]) {
     await glossSelect.selectOption(gloss);
     await addGloss.click();

@@ -41,17 +41,17 @@ Allowing all Chrome extensions is suitable only for the hackathon demo. After th
 ## Prepare the demo
 
 1. Open a Meet call and turn captions on.
-2. Test a bundled phrase such as “How are you?” and review the animation with a knowledgeable ISL signer.
+2. Speak a question such as “How are you?” and confirm its caption automatically starts the animation.
 3. Open **ISL phrase clip studio** and record signer-verified replacements for the five interview intents where possible.
 4. Start the SignBridge camera.
 5. Calibrate only the 8–12 signs used in the scripted demo.
 6. Select **Check Gemma** and verify the green ready status.
-7. Enable **Live sign → audio** for automatic phrase delivery, or leave it off for review-first mode.
-8. Rehearse both scripted question/answer paths three times.
+7. Sign the demo phrase and confirm it is spoken automatically after the short neutral pause.
+8. Rehearse both automatic directions three times.
 
 The recorded phrase clips and gesture templates remain in local browser storage. They are not included in the source tree.
 
-The build also includes 44 locally bundled dataset labels. Exact phrase labels are shown as **Dataset phrase clip · review**; assembled word sequences are shown as **Approximate dataset sequence**. See `docs/SIGN_DATASETS.md` to replace or expand them.
+The build includes 44 locally bundled dataset labels and 35 alphanumeric fingerspelling signs. Exact phrase labels are shown as **Dataset phrase clip · review**; assembled word sequences and fingerspelling are explicitly marked approximate. See `docs/SIGN_DATASETS.md` to replace or expand them.
 
 ## Network mode
 

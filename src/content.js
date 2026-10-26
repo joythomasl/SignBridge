@@ -15,7 +15,9 @@ async function boot() {
   let settings = await getSettings();
   let templates = await getTemplates();
   const signLibrary = await loadBundledSignLibrary();
+  const fingerspellingLibrary = await loadFingerspellingLibrary();
   const signClipsById = new Map(signLibrary.clips.map((clip) => [clip.id, clip]));
+  const fingerspellingByLabel = new Map(fingerspellingLibrary.signs.map((sign) => [sign.label, sign.frame]));
   const candidateVocabulary = [...new Set([
     ...DEMO_GLOSSES,
     ...signLibrary.clips.map((clip) => clip.label.toUpperCase())
@@ -29,6 +31,12 @@ async function boot() {
   let signClipUrl = null;
   let liveTimer = null;
   let liveGenerating = false;
+  let autoQuestionTimer = null;
+  let reverseGenerating = false;
+  let queuedQuestion = "";
+  let lastTranslatedQuestion = "";
+  let lastSpokenText = "";
+  let lastSpokenAt = 0;
 
   const hud = new SignBridgeHud({
     startCamera,
@@ -36,9 +44,7 @@ async function boot() {
     calibrate,
     addGloss,
     clearGlosses,
-    generateAnswer: handleGenerateAnswer,
-    translateToSign,
-    useLatestCaption,
+    questionChanged: scheduleAutoQuestion,
     speak,
     copy,
     insertChat,
@@ -48,8 +54,7 @@ async function boot() {
     slowerSign: () => hud.slowerSign(),
     recordClip,
     stopRecording,
-    deleteClip: handleDeleteClip,
-    toggleLiveMode: handleToggleLiveMode
+    deleteClip: handleDeleteClip
   }, candidateVocabulary);
   hud.setSettings(settings);
   hud.renderGlosses(glossBuffer, removeGloss);
@@ -99,12 +104,17 @@ async function boot() {
     onCaption(caption) {
       latestCaption = caption;
       hud.showLatestCaption(caption);
+      if (looksLikeQuestion(caption) && !isRecentSpokenCaption(caption)) {
+        hud.setQuestion(caption, "caption");
+        scheduleAutoQuestion(caption);
+      }
     }
   });
   meet.start();
 
   await updateClipInventory();
-  hud.setStatus("Ready. Check Gemma, record ISL clips, then start the camera.", "info");
+  hud.setLiveState("Always-live mode ready — start the camera to begin", true);
+  hud.setStatus("Always-live mode ready. Meet questions and signed responses are processed automatically.", "success");
 
   async function startCamera() {
     try {
@@ -224,7 +234,7 @@ async function boot() {
   }
 
   function scheduleLiveGeneration() {
-    if (!hud.isLiveMode() || !glossBuffer.length) return;
+    if (!glossBuffer.length) return;
     cancelLiveTimer();
     hud.setLiveState("Signing detected — pause briefly to speak", true);
     liveTimer = setTimeout(flushLivePhrase, settings.livePauseMs || 1200);
@@ -232,7 +242,7 @@ async function boot() {
 
   async function flushLivePhrase() {
     liveTimer = null;
-    if (!hud.isLiveMode() || !glossBuffer.length) return;
+    if (!glossBuffer.length) return;
     if (liveGenerating) {
       scheduleLiveGeneration();
       return;
@@ -264,58 +274,86 @@ async function boot() {
     liveTimer = null;
   }
 
-  async function handleToggleLiveMode(enabled) {
-    settings = await saveSettings({ ...settings, liveSignToAudio: enabled });
-    if (enabled) {
-      hud.setLiveState("Live audio ready — pause briefly to speak", true);
-      hud.setStatus("Live sign-to-audio enabled. Recognized phrases will be spoken automatically.", "success");
-      scheduleLiveGeneration();
-    } else {
-      cancelLiveTimer();
-      speechSynthesis.cancel();
-      hud.setLiveState("Live audio is off", false);
-      hud.setStatus("Live sign-to-audio disabled.", "info");
-    }
+  function scheduleAutoQuestion(question) {
+    const normalized = String(question || "").trim();
+    if (!normalized || normalized === lastTranslatedQuestion) return;
+    clearTimeout(autoQuestionTimer);
+    hud.setStatus("Interviewer question detected — preparing ISL…", "info");
+    autoQuestionTimer = setTimeout(() => translateToSign(normalized), 450);
   }
 
-  async function translateToSign() {
-    const question = hud.getQuestion();
+  async function translateToSign(questionOverride = "") {
+    const question = questionOverride || hud.getQuestion();
     if (!question) {
-      hud.setStatus("Add the interviewer’s question first.", "warn");
       return;
     }
+    if (reverseGenerating) {
+      queuedQuestion = question;
+      return;
+    }
+    const localExact = signLibrary.clips.find((clip) => normalizePhrase(clip.label) === normalizePhrase(question));
+    if (localExact) {
+      hud.showSignResult({
+        question,
+        glosses: [localExact.label.toUpperCase()],
+        clipUrl: null,
+        frameSequences: [{ fps: localExact.fps, frames: localExact.frames.map((frame) => chrome.runtime.getURL(frame)) }],
+        exact: true,
+        quality: "Dataset phrase clip · review"
+      });
+      lastTranslatedQuestion = question;
+      hud.setStatus("Interviewer question detected and exact dataset animation started.", "warn");
+      return;
+    }
+    const spellingSequence = createFingerspellingSequence(question);
+    if (spellingSequence.frames.length) {
+      hud.showSignResult({
+        question,
+        glosses: ["LIVE FINGERSPELLING"],
+        clipUrl: null,
+        frameSequences: [spellingSequence],
+        exact: false,
+        quality: "Live fingerspelling · approximate"
+      });
+      hud.setStatus("Question detected — fingerspelling started while Gemma selects the best ISL clips.", "info");
+    }
+    reverseGenerating = true;
     hud.setStatus("Gemma 4 is mapping the question to verified ISL…", "info");
     try {
       const availableClips = signLibrary.clips.map(({ id, label, kind }) => ({ id, label, kind }));
       const response = await mapQuestionToSign(settings, question, INTENTS, availableClips);
       const result = response.result || {};
       const validIntent = INTENTS.some((item) => item.id === result.intent) ? result.intent : "UNSUPPORTED";
-      const exactBuiltIn = result.exact_clip !== "NONE" ? signClipsById.get(result.exact_clip) : null;
-      const selectedIds = exactBuiltIn
-        ? [exactBuiltIn.id]
+      const mappedExactBuiltIn = result.exact_clip !== "NONE" ? signClipsById.get(result.exact_clip) : null;
+      const selectedIds = mappedExactBuiltIn
+        ? [mappedExactBuiltIn.id]
         : Array.isArray(result.clips) ? result.clips.filter((id) => signClipsById.has(id)).slice(0, 8) : [];
       const selectedClips = selectedIds.map((id) => signClipsById.get(id));
       const glosses = selectedClips.map((item) => item.label.toUpperCase());
       const clip = validIntent === "UNSUPPORTED" ? null : await getClip(validIntent);
       if (signClipUrl) URL.revokeObjectURL(signClipUrl);
       signClipUrl = clip?.blob ? URL.createObjectURL(clip.blob) : null;
-      const frameSequences = signClipUrl ? [] : selectedClips.map((item) => ({
+      const datasetSequences = selectedClips.map((item) => ({
         fps: item.fps,
         frames: item.frames.map((frame) => chrome.runtime.getURL(frame))
       }));
+      const usingFingerspelling = !signClipUrl && !datasetSequences.length && spellingSequence.frames.length;
+      const frameSequences = signClipUrl ? [] : datasetSequences.length ? datasetSequences : usingFingerspelling ? [spellingSequence] : [];
       const quality = signClipUrl
         ? "Verified signer recording"
-        : exactBuiltIn
+        : mappedExactBuiltIn
           ? "Dataset phrase clip · review"
-          : frameSequences.length
+          : datasetSequences.length
             ? "Approximate dataset sequence"
+            : usingFingerspelling
+              ? "Live fingerspelling · approximate"
             : "Unsupported";
       hud.showSignResult({
         question,
         glosses,
         clipUrl: signClipUrl,
         frameSequences,
-        exact: Boolean(signClipUrl || exactBuiltIn),
+        exact: Boolean(signClipUrl || mappedExactBuiltIn),
         quality,
         message: validIntent === "UNSUPPORTED"
           ? "This question is outside the supported interview intents. Read the caption; only available dataset concepts are shown."
@@ -323,12 +361,29 @@ async function boot() {
       });
       hud.setMetrics(response.metrics);
       if (signClipUrl) hud.setStatus("Verified ISL signer recording is playing.", "success");
-      else if (exactBuiltIn) hud.setStatus("Exact dataset phrase is playing. Review its ISL accuracy before the demo.", "warn");
-      else if (frameSequences.length) hud.setStatus("Approximate dataset sequence is playing with the original caption retained.", "warn");
+      else if (mappedExactBuiltIn) hud.setStatus("Exact dataset phrase is playing. Review its ISL accuracy before the demo.", "warn");
+      else if (datasetSequences.length) hud.setStatus("Approximate dataset sequence is playing with the original caption retained.", "warn");
+      else if (usingFingerspelling) hud.setStatus("No phrase match; the question is being fingerspelled with its caption retained.", "warn");
       else hud.setStatus("No matching dataset clip is available. Caption retained; no false signing shown.", "warn");
+      lastTranslatedQuestion = question;
     } catch (error) {
-      hud.showSignResult({ question, glosses: [], clipUrl: null, exact: false, message: `Could not map this question: ${error.message}` });
-      hud.setStatus(`Question-to-ISL failed: ${error.message}`, "error");
+      hud.showSignResult({
+        question,
+        glosses: spellingSequence.frames.length ? ["LIVE FINGERSPELLING"] : [],
+        clipUrl: null,
+        frameSequences: spellingSequence.frames.length ? [spellingSequence] : [],
+        exact: false,
+        quality: spellingSequence.frames.length ? "Live fingerspelling · approximate" : "Unsupported",
+        message: `Could not map this question: ${error.message}`
+      });
+      hud.setStatus(spellingSequence.frames.length ? "Gemma mapping failed; live fingerspelling continues." : `Question-to-ISL failed: ${error.message}`, "warn");
+    } finally {
+      reverseGenerating = false;
+      if (queuedQuestion && queuedQuestion !== question) {
+        const nextQuestion = queuedQuestion;
+        queuedQuestion = "";
+        scheduleAutoQuestion(nextQuestion);
+      }
     }
   }
 
@@ -349,11 +404,30 @@ async function boot() {
   }
 
   function speakText(text) {
+    lastSpokenText = text;
+    lastSpokenAt = Date.now();
     speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-IN";
     utterance.rate = settings.speechRate;
     speechSynthesis.speak(utterance);
+  }
+
+  function isRecentSpokenCaption(caption) {
+    if (!lastSpokenText || Date.now() - lastSpokenAt > 15000) return false;
+    const captionText = normalizePhrase(caption);
+    const spokenText = normalizePhrase(lastSpokenText);
+    return captionText.length > 10 && (captionText.includes(spokenText) || spokenText.includes(captionText));
+  }
+
+  function createFingerspellingSequence(text) {
+    const frames = [];
+    for (const character of String(text || "").toUpperCase().slice(0, 80)) {
+      const frame = fingerspellingByLabel.get(character);
+      if (frame) frames.push(chrome.runtime.getURL(frame));
+      else if (/\s/.test(character) && frames.length) frames.push(frames.at(-1), frames.at(-1));
+    }
+    return { fps: 4, frames };
   }
 
   async function copy() {
@@ -455,6 +529,15 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function normalizePhrase(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function looksLikeQuestion(value) {
+  const text = normalizePhrase(value);
+  return /\b(what|why|how|when|where|who|which|can|could|would|will|do|does|did|have|has|tell|describe|explain|please|walk)\b/.test(text);
+}
+
 async function loadBundledSignLibrary() {
   try {
     const response = await fetch(chrome.runtime.getURL("assets/signs/library.json"));
@@ -464,5 +547,17 @@ async function loadBundledSignLibrary() {
   } catch (error) {
     console.warn("SignBridge bundled sign library unavailable", error);
     return { version: 1, clips: [] };
+  }
+}
+
+async function loadFingerspellingLibrary() {
+  try {
+    const response = await fetch(chrome.runtime.getURL("assets/signs/fingerspelling.json"));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const manifest = await response.json();
+    return { ...manifest, signs: Array.isArray(manifest.signs) ? manifest.signs : [] };
+  } catch (error) {
+    console.warn("SignBridge fingerspelling library unavailable", error);
+    return { version: 1, signs: [] };
   }
 }

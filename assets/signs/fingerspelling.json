@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "language": "Indian Sign Language fingerspelling dataset",
+  "source": "archive (2).zip",
+  "license": "Unknown — verify before redistribution",
+  "signs": [
+    {
+      "label": "1",
+      "frame": "assets/signs/fingerspelling/1.webp"
+    },
+    {
+      "label": "2",
+      "frame": "assets/signs/fingerspelling/2.webp"
+    },
+    {
+      "label": "3",
+      "frame": "assets/signs/fingerspelling/3.webp"
+    },
+    {
+      "label": "4",
+      "frame": "assets/signs/fingerspelling/4.webp"
+    },
+    {
+      "label": "5",
+      "frame": "assets/signs/fingerspelling/5.webp"
+    },
+    {
+      "label": "6",
+      "frame": "assets/signs/fingerspelling/6.webp"
+    },
+    {
+      "label": "7",
+      "frame": "assets/signs/fingerspelling/7.webp"
+    },
+    {
+      "label": "8",
+      "frame": "assets/signs/fingerspelling/8.webp"
+    },
+    {
+      "label": "9",
+      "frame": "assets/signs/fingerspelling/9.webp"
+    },
+    {
+      "label": "A",
+      "frame": "assets/signs/fingerspelling/A.webp"
+    },
+    {
+      "label": "B",
+      "frame": "assets/signs/fingerspelling/B.webp"
+    },
+    {
+      "label": "C",
+      "frame": "assets/signs/fingerspelling/C.webp"
+    },
+    {
+      "label": "D",
+      "frame": "assets/signs/fingerspelling/D.webp"
+    },
+    {
+      "label": "E",
+      "frame": "assets/signs/fingerspelling/E.webp"
+    },
+    {
+      "label": "F",
+      "frame": "assets/signs/fingerspelling/F.webp"
+    },
+    {
+      "label": "G",
+      "frame": "assets/signs/fingerspelling/G.webp"
+    },
+    {
+      "label": "H",
+      "frame": "assets/signs/fingerspelling/H.webp"
+    },
+    {
+      "label": "I",
+      "frame": "assets/signs/fingerspelling/I.webp"
+    },
+    {
+      "label": "J",
+      "frame": "assets/signs/fingerspelling/J.webp"
+    },
+    {
+      "label": "K",
+      "frame": "assets/signs/fingerspelling/K.webp"
+    },
+    {
+      "label": "L",
+      "frame": "assets/signs/fingerspelling/L.webp"
+    },
+    {
+      "label": "M",
+      "frame": "assets/signs/fingerspelling/M.webp"
+    },
+    {
+      "label": "N",
+      "frame": "assets/signs/fingerspelling/N.webp"
+    },
+    {
+      "label": "O",
+      "frame": "assets/signs/fingerspelling/O.webp"
+    },
+    {
+      "label": "P",
+      "frame": "assets/signs/fingerspelling/P.webp"
+    },
+    {
+      "label": "Q",
+      "frame": "assets/signs/fingerspelling/Q.webp"
+    },
+    {
+      "label": "R",
+      "frame": "assets/signs/fingerspelling/R.webp"
+    },
+    {
+      "label": "S",
+      "frame": "assets/signs/fingerspelling/S.webp"
+    },
+    {
+      "label": "T",
+      "frame": "assets/signs/fingerspelling/T.webp"
+    },
+    {
+      "label": "U",
+      "frame": "assets/signs/fingerspelling/U.webp"
+    },
+    {
+      "label": "V",
+      "frame": "assets/signs/fingerspelling/V.webp"
+    },
+    {
+      "label": "W",
+      "frame": "assets/signs/fingerspelling/W.webp"
+    },
+    {
+      "label": "X",
+      "frame": "assets/signs/fingerspelling/X.webp"
+    },
+    {
+      "label": "Y",
+      "frame": "assets/signs/fingerspelling/Y.webp"
+    },
+    {
+      "label": "Z",
+      "frame": "assets/signs/fingerspelling/Z.webp"
+    }
+  ]
+}

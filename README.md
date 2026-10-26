@@ -5,12 +5,13 @@ A 24-hour hackathon prototype that adds a candidate-controlled, bidirectional IS
 ## What works
 
 - Calibrate and recognize a small demo vocabulary.
-- Capture Meet captions or accept manual question text.
+- Automatically detect stabilized Meet questions, retain manual text as a fallback, and start visual translation without a button.
 - Generate a constrained answer with local Gemma 4.
-- Optionally translate and speak signed phrases automatically after a 1.2-second signing pause.
+- Translate and speak signed phrases automatically after a 1.2-second signing pause.
 - Keep a review-first mode with mandatory approval before manual speech or Meet chat insertion.
 - Map supported questions to locally recorded, verified ISL phrase clips.
 - Play 44 bundled dataset words/phrases as exact or explicitly approximate animations.
+- Immediately fingerspell unsupported questions with 35 bundled alphanumeric signs while Gemma searches for a better phrase sequence.
 - Store gesture templates and phrase clips in local browser storage.
 
 ## Quick start
@@ -46,7 +47,7 @@ The importer accepts `label/frame.png` or `label/frame.jpg`, including a ZIP nes
 
 ## Live sign-to-audio
 
-Enable **Live sign → audio** in the Candidate signs section. SignBridge continuously accumulates recognized glosses; after a short neutral pause, Gemma 4 renders the phrase and browser TTS speaks it automatically. The extension then clears only the processed glosses and continues listening. Automatic chat sending remains disabled.
+Live mode is always enabled. SignBridge continuously accumulates recognized glosses; after a short neutral pause, Gemma 4 renders the phrase and browser TTS speaks it automatically. The extension then clears only the processed glosses and continues listening. Meet questions automatically start exact phrase, word-sequence, or fingerspelling animation. Automatic chat sending remains disabled.
 
 ## Important limitation
 

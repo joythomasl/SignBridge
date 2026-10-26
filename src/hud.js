@@ -39,12 +39,8 @@ export class SignBridgeHud {
 
           <section class="sb-section">
             <div class="sb-section-title"><span>1</span> Interviewer question</div>
-            <textarea id="sb-question" rows="2" placeholder="Meet caption appears here, or type the question…"></textarea>
-            <div class="sb-row">
-              <button id="sb-translate-sign" class="sb-primary">Show in ISL</button>
-              <button id="sb-use-caption">Use latest caption</button>
-            </div>
-            <small id="sb-caption-state" class="sb-muted">Caption observer is active</small>
+            <textarea id="sb-question" rows="2" placeholder="Meet captions are detected and translated automatically…"></textarea>
+            <small id="sb-caption-state" class="sb-muted">Live caption detection is active</small>
           </section>
 
           <section class="sb-section sb-sign-output">
@@ -85,22 +81,20 @@ export class SignBridgeHud {
               <button id="sb-start-camera" class="sb-primary">Start camera</button>
               <button id="sb-stop-camera" disabled>Stop</button>
             </div>
-            <div class="sb-calibration">
-              <select id="sb-calibration-gloss">${glossOptions}</select>
-              <button id="sb-calibrate">Calibrate sign</button>
-            </div>
-            <button id="sb-add-gloss" class="sb-full-button">Add selected gloss manually</button>
-            <div id="sb-calibration-state" class="sb-muted">Calibrate the signs used in your demo.</div>
-            <label class="sb-check sb-live-toggle">
-              <input id="sb-live-audio" type="checkbox">
-              <span><strong>Live sign → audio</strong><small> Speaks automatically after a short signing pause</small></span>
-            </label>
-            <div id="sb-live-state" class="sb-muted">Live audio is off</div>
+            <div class="sb-live-banner"><strong>Live sign → audio always on</strong><small>Signs are spoken automatically after a short neutral pause.</small></div>
+            <div id="sb-live-state" class="sb-muted" data-active="true">Waiting for camera and signs</div>
             <div id="sb-gloss-buffer" class="sb-chips sb-buffer"></div>
-            <div class="sb-row">
-              <button id="sb-clear-glosses">Clear</button>
-              <button id="sb-generate-answer" class="sb-primary">Finish & generate</button>
-            </div>
+            <button id="sb-clear-glosses" class="sb-full-button">Clear current phrase</button>
+            <details class="sb-details">
+              <summary>Recognition setup and fallback</summary>
+              <p class="sb-muted">Calibration is needed only for signs the camera has not learned for this signer.</p>
+              <div class="sb-calibration">
+                <select id="sb-calibration-gloss">${glossOptions}</select>
+                <button id="sb-calibrate">Calibrate sign</button>
+              </div>
+              <button id="sb-add-gloss" class="sb-full-button">Add selected gloss manually</button>
+              <div id="sb-calibration-state" class="sb-muted">Calibrate only the signs used in your demo.</div>
+            </details>
           </section>
 
           <section class="sb-section">
@@ -140,9 +134,6 @@ export class SignBridgeHud {
       "#sb-calibrate": "calibrate",
       "#sb-add-gloss": "addGloss",
       "#sb-clear-glosses": "clearGlosses",
-      "#sb-generate-answer": "generateAnswer",
-      "#sb-translate-sign": "translateToSign",
-      "#sb-use-caption": "useLatestCaption",
       "#sb-speak": "speak",
       "#sb-copy": "copy",
       "#sb-chat": "insertChat",
@@ -158,7 +149,7 @@ export class SignBridgeHud {
       this.$(selector).addEventListener("click", () => this.handlers[handler]?.());
     }
     this.$("#sb-approved").addEventListener("change", (event) => this.setApproved(event.target.checked));
-    this.$("#sb-live-audio").addEventListener("change", (event) => this.handlers.toggleLiveMode?.(event.target.checked));
+    this.$("#sb-question").addEventListener("input", (event) => this.handlers.questionChanged?.(event.target.value.trim()));
     this.$("#sb-answer").addEventListener("input", () => {
       this.$("#sb-approved").checked = false;
       this.setApproved(false);
@@ -176,7 +167,6 @@ export class SignBridgeHud {
   getAnswer() { return this.$("#sb-answer").value.trim(); }
   getCalibrationGloss() { return this.$("#sb-calibration-gloss").value; }
   getClipIntent() { return this.$("#sb-clip-intent").value; }
-  isLiveMode() { return this.$("#sb-live-audio").checked; }
 
   getSettingsForm() {
     return {
@@ -190,8 +180,7 @@ export class SignBridgeHud {
     this.$("#sb-endpoint").value = settings.endpoint || "";
     this.$("#sb-model").value = settings.model || "";
     this.$("#sb-api-key").value = settings.apiKey || "";
-    this.$("#sb-live-audio").checked = Boolean(settings.liveSignToAudio);
-    this.setLiveState(settings.liveSignToAudio ? "Live audio ready — pause briefly to speak" : "Live audio is off", settings.liveSignToAudio);
+    this.setLiveState("Always-live mode ready — pause briefly to speak", true);
     this.$("#sb-mode-badge").textContent = settings.endpoint?.includes("localhost") || settings.endpoint?.includes("127.0.0.1") ? "Gemma 4 local" : "Gemma 4 network";
   }
 
@@ -215,7 +204,7 @@ export class SignBridgeHud {
     this.$("#sb-stop-camera").disabled = !running;
   }
 
-  setLiveState(message, active = this.isLiveMode()) {
+  setLiveState(message, active = true) {
     const state = this.$("#sb-live-state");
     state.textContent = message;
     state.dataset.active = String(Boolean(active));
