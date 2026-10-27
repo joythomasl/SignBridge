@@ -53,16 +53,18 @@ async function boot() {
         hud.setStatus(`Sequence too short (${frameDetails}); hold the spelling longer.`, "warn");
         return;
       }
-      if (isKaggleDummy(text)) {
-        hud.setStatus(`Model rejected this ${match.frames}-frame segment (${confidence}). Keep spelling the whole word continuously, then lower your hand.`, "warn");
+      if (isKaggleDummy(match.rawText)) {
+        hud.setStatus(`Model confidence gate rejected “${match.rawText}” (${Math.round((match.rawScore || 0) * 100)}%; ${match.frames} frames). Keep spelling the whole word continuously, then lower your hand.`, "warn");
         return;
       }
       if (!/^[A-Z ]{1,80}$/.test(text)) {
         hud.setStatus(`Model output was not A–Z text: “${text.slice(0, 24) || "(empty)"}” (${confidence}; ${frameDetails}).`, "warn");
         return;
       }
-      if (!Number.isFinite(match.score) || match.score < 0.65) {
-        hud.setStatus(`Model guess “${text}” was withheld (${confidence}; ${frameDetails}).`, "warn");
+      if (!Number.isFinite(match.score) || match.score < 0.65 || match.constrainedTokens > 0) {
+        const raw = match.rawText && match.rawText !== text ? `; unrestricted model output “${match.rawText}” at ${Math.round((match.rawScore || 0) * 100)}%` : "";
+        const constraint = match.constrainedTokens ? `; ${match.constrainedTokens} non-letter token(s) excluded` : "";
+        hud.setStatus(`Letter-only guess “${text}” was withheld (${confidence}${constraint}${raw}; ${frameDetails}).`, "warn");
         return;
       }
       if (liveGenerating) { pendingTranscripts.push(text); return; }

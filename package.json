@@ -1,6 +1,6 @@
 {
   "name": "signbridge-ai",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "type": "module",
   "description": "Gemma 4-powered bidirectional interview accessibility prototype for Google Meet",

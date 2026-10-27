@@ -2,7 +2,7 @@
 
 The Chrome extension now recognizes **letters only**. It uses the [released first-place Kaggle ASL fingerspelling TFLite model](https://github.com/ChristofHenkel/kaggle-asl-fingerspelling-1st-place-solution/releases/tag/v0.0.1-alpha) to decode a completed landmark sequence. The `assets/asl/fingerspelling-model.tflite` file is the 40,946,288-byte `cfg_2/fold-1/model.tflite` from that release. `inference_args.json` defines the exact 390 face, hand, and pose columns. `character_to_prediction_index.json` defines the output character IDs. Keep these three files together.
 
-The runtime uses the first-place sequence model as its only automatic letter recognizer. The former static alphabet preview has been removed from the recognition path. The extension accepts only A–Z and spaces from model output, and withholds low-confidence results from speech.
+The runtime uses the first-place sequence model as its only automatic letter recognizer. The former static alphabet preview has been removed from the recognition path. The decoder constrains each output step to A–Z and spaces; if it must substitute for a number or punctuation token, that candidate is shown for diagnosis but not spoken automatically.
 
 The prior everyday ISL and MS-ASL archives are not used by the runtime. Importing an image archive does not retrain the first-place model. To improve signer-independent accuracy, evaluate against recordings from signers, cameras, and lighting conditions absent from training, then train or fine-tune a sequence model with the appropriate data and license. The supplied GitHub repository describes its training pipeline; this project does not retrain its weights.
 
