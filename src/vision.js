@@ -17,14 +17,12 @@ function colorForPoint(index) {
 }
 
 export class VisionController {
-  constructor({ video, canvas, fps = 15, onVector, onLetter, onPreview, onTranscript, onModelStatus, onError }) {
+  constructor({ video, canvas, fps = 15, onVector, onTranscript, onModelStatus, onError }) {
     this.video = video;
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
     this.fps = fps;
     this.onVector = onVector;
-    this.onLetter = onLetter;
-    this.onPreview = onPreview;
     this.onTranscript = onTranscript;
     this.onModelStatus = onModelStatus;
     this.onError = onError;
@@ -127,7 +125,7 @@ export class VisionController {
     if (event.source !== this.frame?.contentWindow) return;
     const message = event.data || {};
     if (message.type === "SIGNBRIDGE_VISION_READY") {
-      this.modelInfo = { letters: message.letters };
+      this.modelInfo = {};
       this.resolveInitialize?.();
       return;
     }
@@ -142,8 +140,6 @@ export class VisionController {
       return;
     }
     if (!this.running && message.type !== "SIGNBRIDGE_VISION_ERROR") return;
-    if (message.type === "SIGNBRIDGE_LETTER_RESULT") { this.onLetter?.(message); return; }
-    if (message.type === "SIGNBRIDGE_LETTER_PREVIEW") { this.onPreview?.(message); return; }
     if (message.type === "SIGNBRIDGE_TRANSCRIPT") { this.onTranscript?.(message); return; }
     if (message.type === "SIGNBRIDGE_VISION_ERROR") {
       this.inFlight = false;

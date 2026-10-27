@@ -18,7 +18,6 @@ async function copyStatic() {
     cp(path.join(root, "manifest.json"), path.join(dist, "manifest.json")),
     cp(path.join(root, "src", "hud.css"), path.join(dist, "hud.css")),
     cp(path.join(root, "src", "vision.html"), path.join(dist, "vision.html")),
-    cp(path.join(root, "assets", "asl", "alphabet-model.json"), path.join(dist, "assets", "asl", "alphabet-model.json")),
     cp(path.join(root, "assets", "asl", "ASL-SignBridge-LICENSE.txt"), path.join(dist, "assets", "asl", "ASL-SignBridge-LICENSE.txt")),
     cp(path.join(root, "assets", "asl", "fingerspelling-model.tflite"), path.join(dist, "assets", "asl", "fingerspelling-model.tflite")),
     cp(path.join(root, "assets", "asl", "inference_args.json"), path.join(dist, "assets", "asl", "inference_args.json")),

@@ -26,26 +26,24 @@ async function boot() {
   hud.renderSpelling(letters);
 
   const vision = new VisionController({
-    video: hud.video, canvas: hud.canvas, fps: Math.max(settings.inferenceFps, 20),
+    video: hud.video, canvas: hud.canvas, fps: 30,
     onVector(vector) {
       if (vector) {
         handsPresent = true;
         cancelLiveTimer();
         if (letters.length) hud.setLiveState("Fingerspelling continues — lower your hand to speak", true);
-        else hud.setDetected({ handPresent: true });
+        hud.setDetected({ handPresent: true });
       } else {
-        if (handsPresent) handsPresent = false;
+        if (handsPresent) {
+          handsPresent = false;
+          hud.setLiveState("Hand lowered — decoding the complete sign sequence", true);
+        }
         hud.setDetected(null);
       }
     },
-    onLetter(match) {
-      if (!/^[A-Z]$/.test(match.gloss)) return;
-      hud.setDetected(match);
-    },
-    onPreview(match) { if (match.gloss) hud.setPreview(match.gloss); },
     onTranscript(match) {
       const text = String(match.text || "").toUpperCase().trim();
-      if (manualEdited || match.score < 0.65 || !/^[A-Z ]{1,80}$/.test(text)) {
+      if (manualEdited || match.frames < 15 || match.score < 0.65 || !/^[A-Z ]{1,80}$/.test(text)) {
         hud.setStatus("Sequence model was uncertain. Please sign again or add letters manually.", "warn");
         return;
       }
@@ -56,7 +54,7 @@ async function boot() {
       void flushLivePhrase(true);
     },
     onModelStatus(ready, message) {
-      hud.setStatus(ready ? "ASL sequence model ready. A–Z handshape preview active." : `Sequence model unavailable (${message}); manual A–Z entry remains available.`, ready ? "success" : "warn");
+      hud.setStatus(ready ? "First-place ASL sequence model ready." : `Sequence model unavailable (${message}); manual A–Z entry remains available.`, ready ? "success" : "warn");
     },
     onError(error) { hud.setStatus(`Vision error: ${error.message}`, "error"); }
   });
@@ -79,8 +77,8 @@ async function boot() {
       await vision.start();
       hud.setCameraRunning(true);
       hud.setStatus(vision.modelInfo.kaggleReady
-        ? "Camera ready. First-place sequence model and A–Z preview loaded."
-        : "Camera ready. A–Z preview loaded; sequence model is loading.", "success");
+        ? "Camera and first-place sequence model ready."
+        : "Camera ready. First-place sequence model is loading.", "success");
     } catch (error) {
       hud.setCameraRunning(false);
       hud.setStatus(`Camera unavailable: ${error.message}`, "error");

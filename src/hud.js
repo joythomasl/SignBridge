@@ -19,7 +19,7 @@ export class SignBridgeHud {
         <header class="sb-header">
           <div>
             <strong>SignBridge AI</strong>
-            <small>Gemma 4 · ASL fingerspelling A–Z</small>
+            <small>Gemma 4 · Kaggle ASL sequence model</small>
           </div>
           <div class="sb-header-actions">
             <span id="sb-mode-badge" class="sb-badge">Checking…</span>
@@ -45,19 +45,19 @@ export class SignBridgeHud {
             <div class="sb-camera-stage">
               <video id="sb-camera" muted playsinline></video>
               <canvas id="sb-canvas"></canvas>
-              <div id="sb-detected" class="sb-detected">No gesture</div>
+              <div id="sb-detected" class="sb-detected">Waiting for hand</div>
             </div>
             <div class="sb-row">
               <button id="sb-start-camera" class="sb-primary">Start camera</button>
               <button id="sb-stop-camera" disabled>Stop</button>
             </div>
-            <div class="sb-live-banner"><strong>ASL fingerspelling → local speech + Meet chat</strong><small>The first-place sequence model checks the completed spelling. Hold each letter, then lower your hand to speak.</small></div>
+            <div class="sb-live-banner"><strong>ASL fingerspelling → automatic speech + Meet chat</strong><small>The first-place sequence model reads the full motion sequence. Keep your hand, face, and shoulders in frame; lower your hand to finish.</small></div>
             <div id="sb-live-state" class="sb-muted" data-active="true">Waiting for camera and signs</div>
             <div id="sb-gloss-buffer" class="sb-spelling" aria-live="polite">Spelled letters appear here</div>
             <div class="sb-row"><button id="sb-space">Space</button><button id="sb-backspace">Backspace</button><button id="sb-clear-glosses">Clear</button></div>
             <details class="sb-details">
               <summary>Recognition and manual correction</summary>
-              <p class="sb-muted">All 26 letters are available. The live preview uses static handshapes and J/Z motion checks; the sequence model checks the completed spelling. Repeat a letter by briefly releasing your hand. Correct uncertain results below.</p>
+              <p class="sb-muted">The trained sequence model is the only automatic letter recognizer. Repeat letters with a brief release. Correct uncertain results with the manual A–Z controls.</p>
               <div class="sb-calibration">
                 <select id="sb-calibration-gloss">${glossOptions}</select>
               </div>
@@ -176,7 +176,7 @@ export class SignBridgeHud {
   setDetected(match) {
     const label = this.$("#sb-detected");
     if (match?.unstable) label.textContent = "Hand moving · hold the sign steady";
-    else if (!match?.gloss) label.textContent = match?.handPresent ? "Hand tracked · unknown sign" : "No hand";
+    else if (!match?.gloss) label.textContent = match?.handPresent ? "Hand tracked · signing" : "No hand";
     else label.textContent = `${match.gloss} · ${Math.round(match.score * 100)}%`;
   }
 

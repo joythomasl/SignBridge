@@ -8,11 +8,11 @@
 
 ## Demo
 
-Keep your face, shoulders, and signing hand in frame. Fingerspell **H E L L O**, pausing or briefly releasing between repeated letters. The handshape preview is only a hint; the sequence model processes the full segment after you lower your hand for about 0.7 seconds. A confident result is spoken automatically and sent to Meet chat. There is no Speak button or approval step.
+Keep your face, shoulders, and signing hand in frame. Fingerspell **H E L L O**, pausing or briefly releasing between repeated letters. The sequence model processes the full segment after you lower your hand for about 0.7 seconds. Segments shorter than 15 frames are ignored. A confident result is spoken automatically and sent to Meet chat. There is no Speak button or approval step.
 
 ## Troubleshooting
 
-- The sequence model covers A–Z. The live preview model covers 24 static handshapes; J and Z need a visible motion path and may require manual correction. Preview letters are never spoken automatically.
+- The sequence model is the only automatic recognizer. Short or uncertain clips are not spoken; add or correct letters with the manual controls when needed.
 - Keep the entire signing hand in frame, use even lighting, and avoid another hand crossing the camera.
 - If letters are wrong, use Backspace and the manual A–Z selector. This prototype has no signer-independent accuracy guarantee.
 - If captions are absent, enable Meet captions; type the question manually if Meet's interface changes. The extension reads Meet's rendered caption container, so Meet must have captions available for your language and account.

@@ -5,8 +5,8 @@ A Chrome extension prototype for Google Meet. It displays interviewer captions a
 ## Current flow
 
 - MediaPipe Holistic tracks hands, face, and pose on the laptop. The bundled **first-place Kaggle ASL fingerspelling TFLite model** decodes a completed landmark sequence into letters. It runs locally in a sandboxed extension iframe through a bundled WASM runtime.
-- A separate handshape model previews the 24 static ASL letters A–I and K–Y during signing. J and Z also have traced motion checks. The full A–Z alphabet is available with manual letter correction, Space, Backspace, and Clear.
-- Preview letters are visual hints only. The sequence model alone produces automatic text; uncertain results are withheld from speech. Lower the hand for about 0.7 seconds to end a spelling segment. A confident result speaks automatically through Chrome text to speech and is sent to Meet chat. There is no isolated word-class prediction.
+- The first-place sequence model is the only automatic letter recognizer. The separate heuristic alphabet preview has been removed so an unrelated handshape guess cannot override the sequence model. Manual A–Z correction, Space, Backspace, and Clear remain available.
+- The extension records the full pose and landmark sequence while a hand is visible. Lower the hand for about 0.7 seconds to end a segment. Segments shorter than the framework's 15-frame minimum are discarded; segments over 384 frames are resampled to the model maximum. Uncertain results are withheld from speech. There is no isolated word-class prediction.
 - Meet captions are switched on automatically when the extension finds the control. Captions appear in the extension and as a bottom overlay. Candidate spelling does not depend on the interviewer question.
 
 ## Build and run
@@ -26,7 +26,7 @@ Load [`dist`](dist) using `chrome://extensions` → Developer mode → Load unpa
 
 The [first-place Kaggle ASL fingerspelling solution](https://github.com/ChristofHenkel/kaggle-asl-fingerspelling-1st-place-solution) supplies the sequence architecture and its [v0.0.1-alpha release](https://github.com/ChristofHenkel/kaggle-asl-fingerspelling-1st-place-solution/releases/tag/v0.0.1-alpha) supplies the TFLite weights. The bundled 40,946,288-byte model matches SHA-256 `4dda856e82c4f909c3ae7eb7f070e5fc88afb143daab639683209b631e3cbfaa`. The browser TFLite wrapper has no dynamic input resize, so this integration reloads the verified model with each segment's actual frame count, capped at 384 frames. This adds latency when the frame count changes. The Apache 2.0 license is included in [`assets/asl/Kaggle-ASL-LICENSE.txt`](assets/asl/Kaggle-ASL-LICENSE.txt).
 
-The bundled [SignBridge static alphabet model](https://github.com/mhmdtaha091/SignBridge) is MIT licensed; its license is included in [`assets/asl/ASL-SignBridge-LICENSE.txt`](assets/asl/ASL-SignBridge-LICENSE.txt). It labels 282 of 288 supplied seed examples correctly, but those examples are not a signer-independent validation set. J/Z preview paths are geometric checks. **Perfect accuracy across users, lighting, cameras, and signing styles has not been established.** The recognizer may abstain or misclassify; use the visible correction controls.
+The project no longer uses a separate static alphabet model for automatic predictions. **Accuracy across users, lighting, cameras, and signing styles has not been established.** The recognizer may abstain or misclassify; use the visible correction controls.
 
 ## Meet audio
 
