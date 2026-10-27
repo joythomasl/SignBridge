@@ -36,6 +36,22 @@ function enqueueGemma(operation) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "SIGNBRIDGE_SPEAK") {
+    const spoken = String(message.text || "").trim();
+    if (!spoken || spoken.length > 500 || !chrome.tts?.speak) {
+      sendResponse({ ok: false, error: "Chrome speech is unavailable or the text is invalid" });
+      return false;
+    }
+    try {
+      chrome.tts.speak(spoken, {
+        lang: "en-US", rate: Math.min(3, Math.max(0.5, Number(message.rate) || 1)), enqueue: false
+      }, () => {
+        const error = chrome.runtime.lastError;
+        sendResponse(error ? { ok: false, error: error.message } : { ok: true });
+      });
+    } catch (error) { sendResponse({ ok: false, error: error?.message || String(error) }); }
+    return true;
+  }
   if (!message?.type?.startsWith("GEMMA_")) return false;
 
   (async () => {

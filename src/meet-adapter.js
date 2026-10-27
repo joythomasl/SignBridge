@@ -28,6 +28,15 @@ function inputText(input) {
     ? input.value : input.textContent);
 }
 
+const CAPTION_CONTAINERS = [
+  'div[jsname="dsyhDe"]', '.a4cQT',
+  '[role="region"][aria-label*="caption" i]',
+  'div[aria-live="polite"][jscontroller]'
+];
+const CAPTION_ENTRIES = 'div[jsname="tgaKEf"], .nMcdL, .TBMuR';
+const CAPTION_TEXT = '.ygicle, div[jsname="YSxPC"], .bh44bd, .iTTPOb';
+const CAPTION_SPEAKERS = '.NWpY1d, .KcIKyf, .zs7s8d';
+
 export class MeetAdapter {
   constructor({ onCaption }) {
     this.onCaption = onCaption;
@@ -35,74 +44,98 @@ export class MeetAdapter {
     this.pendingCaption = "";
     this.captionTimer = null;
     this.observer = null;
+    this.pageObserver = null;
+    this.scanTimer = null;
+    this.container = null;
+    this.ccAttempted = false;
+    this.lastCcSearchAt = 0;
+    this.startedAt = 0;
   }
 
   start() {
-    this.observer = new MutationObserver((mutations) => this.handleMutations(mutations));
-    this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    this.startedAt = performance.now();
+    this.pageObserver = new MutationObserver(() => this.findCaptionContainer());
+    this.pageObserver.observe(document.body, { childList: true, subtree: true });
+    this.scanTimer = setInterval(() => this.findCaptionContainer(), 500);
+    this.findCaptionContainer();
   }
 
   stop() {
     this.observer?.disconnect();
+    this.pageObserver?.disconnect();
+    clearInterval(this.scanTimer);
     clearTimeout(this.captionTimer);
   }
 
-  handleMutations(mutations) {
-    const candidates = [];
-    for (const mutation of mutations) {
-      const target = mutation.target.nodeType === Node.TEXT_NODE ? mutation.target.parentElement : mutation.target;
-      if (!target || target.closest?.("#signbridge-root")) continue;
-      const liveRegion = target.closest?.('[aria-live="polite"], [aria-live="assertive"], [role="log"]');
-      if (liveRegion) candidates.push({ target, liveRegion });
-      for (const node of mutation.addedNodes || []) {
-        if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        if (node.matches?.('[aria-live="polite"], [aria-live="assertive"], [role="log"]')) candidates.push({ target: node, liveRegion: node });
-        node.querySelectorAll?.('[aria-live="polite"], [aria-live="assertive"], [role="log"]').forEach((item) => candidates.push({ target: item, liveRegion: item }));
-      }
+  findCaptionContainer() {
+    const found = CAPTION_CONTAINERS.flatMap((selector) => [...document.querySelectorAll(selector)])
+      .find((element) => !belongsToSignBridge(element) && isVisible(element));
+    if (!found) {
+      this.observer?.disconnect();
+      this.container = null;
+      if (!this.ccAttempted && performance.now() - this.startedAt > 1500) this.enableCaptionsOnce();
+      return;
     }
-
-    const meetCaptions = document.querySelector('[role="region"][aria-label*="caption" i]');
-    if (meetCaptions) candidates.push({ target: meetCaptions, liveRegion: meetCaptions });
-
-    for (const { target, liveRegion } of candidates) {
-      const text = this.extractCaptionText(target, liveRegion);
-      if (this.looksLikeCaption(text)) this.queueCaption(text);
+    if (found !== this.container) {
+      this.observer?.disconnect();
+      this.container = found;
+      this.observer = new MutationObserver(() => this.readCaptions());
+      this.observer.observe(found, { childList: true, subtree: true, characterData: true });
     }
+    this.readCaptions();
   }
 
-  extractCaptionText(target, liveRegion) {
-    let current = target;
-    let best = "";
-    while (current && current !== liveRegion.parentElement) {
-      const text = normalizeText(current.innerText || current.textContent);
-      const wordCount = text.split(" ").filter(Boolean).length;
-      if (wordCount >= 2 && text.length <= 320) best = text;
-      if (current === liveRegion) break;
-      current = current.parentElement;
+  enableCaptionsOnce() {
+    if (performance.now() - this.lastCcSearchAt < 5000) return;
+    this.lastCcSearchAt = performance.now();
+    const button = deepQueryAll('button, [role="button"]').find((item) => {
+      if (!isVisible(item) || belongsToSignBridge(item)) return false;
+      const label = [item.getAttribute("aria-label"), item.getAttribute("title"), item.textContent].join(" ").toLowerCase();
+      return /closed_caption_off|turn on captions|enable captions/.test(label);
+    });
+    if (button) { this.ccAttempted = true; button.click(); }
+  }
+
+  readCaptions() {
+    const container = this.container;
+    if (!container) return;
+    const entries = [...container.querySelectorAll(CAPTION_ENTRIES)];
+    if (entries.length) {
+      for (const entry of entries.slice(-2)) {
+        const speaker = normalizeText(entry.querySelector(CAPTION_SPEAKERS)?.textContent);
+        const textElement = entry.querySelector(CAPTION_TEXT) || entry.lastElementChild || entry;
+        let caption = normalizeText(textElement.innerText || textElement.textContent);
+        if (speaker && caption.startsWith(speaker)) caption = normalizeText(caption.slice(speaker.length));
+        if (this.looksLikeCaption(caption)) this.queueCaption(caption);
+      }
+      return;
     }
-    const lines = String(best || liveRegion.innerText || liveRegion.textContent || "")
+    const textElement = container.querySelector(CAPTION_TEXT) || container;
+    const lines = String(textElement.innerText || textElement.textContent || "")
       .split(/[\r\n]+/)
       .map(normalizeText)
       .filter(Boolean);
     if (lines.length > 1 && lines[0].length <= 48 && lines[0].split(" ").length <= 5) lines.shift();
-    return normalizeText(lines.join(" "));
+    const caption = normalizeText(lines.join(" "));
+    if (this.looksLikeCaption(caption)) this.queueCaption(caption);
   }
 
   looksLikeCaption(text) {
     if (!text || text === this.lastCaption || text.length < 4 || text.length > 320) return false;
-    if (/signbridge|you are presenting|microphone|camera|joined|left the call/i.test(text)) return false;
+    if (/^(captions? (are )?(on|off)|turn(ed)? on captions|turn(ed)? off captions)$/i.test(text)) return false;
     const words = text.split(" ");
     return words.length >= 2;
   }
 
   queueCaption(text) {
     this.pendingCaption = text;
-    clearTimeout(this.captionTimer);
+    if (this.captionTimer) return;
     this.captionTimer = setTimeout(() => {
+      this.captionTimer = null;
       if (!this.pendingCaption || this.pendingCaption === this.lastCaption) return;
       this.lastCaption = this.pendingCaption;
       this.onCaption?.(this.lastCaption);
-    }, 900);
+    }, 220);
   }
 
   insertChatDraft(text) {
@@ -159,14 +192,16 @@ export class MeetAdapter {
   }
 
   async sendChatMessage(text) {
+    let openedByUs = false;
+    let chatButton = null;
     if (!this.findChatInput()) {
-      const chatButton = deepQueryAll('button, [role="button"]')
+      chatButton = deepQueryAll('button, [role="button"]')
         .find((button) => isVisible(button) && !belongsToSignBridge(button)
           && /chat|in.call messages|messages/i.test([
             button.getAttribute("aria-label"), button.getAttribute("data-tooltip"),
             button.getAttribute("title"), button.textContent?.slice(0, 60)
           ].join(" ")));
-      chatButton?.click();
+      if (chatButton) { chatButton.click(); openedByUs = true; }
       const startedAt = performance.now();
       while (!this.findChatInput() && performance.now() - startedAt < 4500) {
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -193,6 +228,7 @@ export class MeetAdapter {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (inputText(input)) throw new Error("Meet did not confirm chat delivery; the draft remains in the composer.");
+    if (openedByUs && isVisible(chatButton)) chatButton.click();
     return true;
   }
 }

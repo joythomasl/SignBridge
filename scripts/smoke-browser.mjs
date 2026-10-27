@@ -41,7 +41,6 @@ try {
   console.log(`Extension worker: ${initialWorkerUrl || "unknown"}`);
   console.log(`Extension origin: ${initialOrigin}`);
   const status = panel.locator("#sb-status");
-  await panel.locator("#sb-start-camera").click();
   try {
     await status.filter({ hasText: "Camera ready" }).waitFor({ timeout: 45000 });
   } catch (error) {
@@ -59,18 +58,37 @@ try {
 
   const reverseQuestion = "How are you?";
   await page.evaluate((caption) => {
-    document.querySelectorAll('[aria-live], [role="log"]').forEach((element) => {
-      if (!element.closest("#signbridge-root")) {
-        element.removeAttribute("aria-live");
-        element.removeAttribute("role");
-      }
-    });
-    const liveCaption = document.createElement("div");
-    liveCaption.id = "signbridge-smoke-caption";
-    liveCaption.setAttribute("aria-live", "polite");
-    liveCaption.textContent = caption;
-    document.body.appendChild(liveCaption);
+    const captionToggle = document.createElement("button");
+    captionToggle.id = "signbridge-smoke-meet-toggle";
+    captionToggle.setAttribute("aria-label", "Turn on captions");
+    captionToggle.style.cssText = "position:fixed;right:10px;bottom:10px;width:180px;height:40px;background:rgb(12,34,56);pointer-events:auto";
+    captionToggle.addEventListener("click", () => {
+      document.body.dataset.signbridgeCaptionToggleClicked = "true";
+      const container = document.createElement("div");
+      container.setAttribute("jsname", "dsyhDe");
+      container.style.cssText = "position:fixed;left:400px;bottom:140px;width:400px;min-height:40px";
+      const entry = document.createElement("div");
+      entry.setAttribute("jsname", "tgaKEf");
+      const speaker = document.createElement("div");
+      speaker.className = "NWpY1d";
+      speaker.textContent = "Interviewer";
+      const text = document.createElement("div");
+      text.className = "ygicle";
+      text.textContent = caption;
+      entry.append(speaker, text);
+      container.append(entry);
+      document.body.append(container);
+    }, { once: true });
+    document.body.append(captionToggle);
   }, reverseQuestion);
+  await page.waitForFunction(() => document.body.dataset.signbridgeCaptionToggleClicked === "true", null, { timeout: 15000 });
+  const meetButtonStyle = await page.locator("#signbridge-smoke-meet-toggle").evaluate((button) => ({
+    background: getComputedStyle(button).backgroundColor,
+    pointerEvents: getComputedStyle(button).pointerEvents
+  }));
+  if (meetButtonStyle.background !== "rgb(12, 34, 56)" || meetButtonStyle.pointerEvents !== "auto") {
+    throw new Error(`Extension CSS leaked into Meet controls: ${JSON.stringify(meetButtonStyle)}`);
+  }
   await page.waitForFunction(() => {
     const input = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-question");
     return Boolean(input?.value);
@@ -78,6 +96,7 @@ try {
   const detectedCaption = await panel.locator("#sb-question").inputValue();
   await panel.locator("#sb-interviewer-caption").filter({ hasText: detectedCaption }).waitFor({ timeout: 15000 });
   if (await panel.locator("#sb-sign-avatar").count()) throw new Error("Interviewer animation should be removed");
+  if (await panel.locator("#sb-speak, #sb-approved").count()) throw new Error("Manual speech or approval controls remain");
   await page.evaluate(() => {
     const body = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-body");
     if (body) body.scrollTop = 0;
@@ -105,7 +124,7 @@ try {
       document.body.dataset.signbridgeChatSent = chat.textContent || "sent";
       chat.textContent = "";
     });
-    openChat.addEventListener("click", () => { panel.hidden = false; });
+    openChat.addEventListener("click", () => { panel.hidden = !panel.hidden; });
     panel.append(chat, send);
     document.body.append(openChat, panel);
   });
@@ -140,6 +159,7 @@ try {
 
   const answerText = await answer.inputValue();
   const finalStatus = await status.textContent();
+  const chatClosedAfterDelivery = await page.evaluate(() => document.querySelector('[aria-label="In-call messages"]')?.hidden);
   const workerUrl = context.serviceWorkers()[0]?.url() || "";
   const extensionOrigin = workerUrl.match(/^chrome-extension:\/\/[^/]+/)?.[0] || "unknown";
   if (answerText.replace(/[^a-z]/gi, "").toUpperCase() !== "HELLO") throw new Error(`Spelling was altered: ${answerText}`);
@@ -155,6 +175,7 @@ try {
     reverseCaption: await panel.locator("#sb-interviewer-caption").textContent(),
     answer: answerText,
     meetChatDelivery: await page.evaluate(() => document.body.dataset.signbridgeChatSent),
+    chatClosedAfterDelivery,
     signScreenshot: signArtifactPath,
     screenshot: artifactPath
   }, null, 2));

@@ -1,7 +1,7 @@
 import { VisionController } from "./vision.js";
 import { SignBridgeHud } from "./hud.js";
 import { MeetAdapter } from "./meet-adapter.js";
-import { checkGemma, renderSpelling, refineMeetCaption } from "./gemma.js";
+import { checkGemma, renderSpelling } from "./gemma.js";
 import { getSettings, saveSettings } from "./storage.js";
 
 if (!document.getElementById("signbridge-root")) boot().catch((error) => console.error("SignBridge failed to start", error));
@@ -12,13 +12,13 @@ async function boot() {
   let handsPresent = false;
   let liveTimer = null;
   let liveGenerating = false;
-  let captionRevision = 0;
   let lastSpokenText = "";
   let lastSpokenAt = 0;
   let manualEdited = false;
+  const pendingTranscripts = [];
 
   const hud = new SignBridgeHud({
-    startCamera, stopCamera, addLetter, addSpace, backspace, clearLetters, speak, copy, insertChat,
+    startCamera, stopCamera, addLetter, addSpace, backspace, clearLetters, copy, insertChat,
     saveSettings: handleSaveSettings, checkGemma: handleCheckGemma,
     questionChanged: (question) => { if (question) hud.showLatestCaption(question); }
   }, [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"]);
@@ -34,55 +34,44 @@ async function boot() {
         if (letters.length) hud.setLiveState("Fingerspelling continues — lower your hand to speak", true);
         else hud.setDetected({ handPresent: true });
       } else {
-        if (handsPresent) { handsPresent = false; scheduleLiveGeneration(); }
+        if (handsPresent) handsPresent = false;
         hud.setDetected(null);
       }
     },
     onLetter(match) {
       if (!/^[A-Z]$/.test(match.gloss)) return;
-      letters.push(match.gloss);
-      hud.renderSpelling(letters);
       hud.setDetected(match);
-      hud.setStatus(`Accepted ASL letter ${match.gloss} (${Math.round(match.score * 100)}%).`, "success");
-      if (!handsPresent) scheduleLiveGeneration();
     },
     onPreview(match) { if (match.gloss) hud.setPreview(match.gloss); },
     onTranscript(match) {
       const text = String(match.text || "").toUpperCase().trim();
       if (manualEdited || match.score < 0.65 || !/^[A-Z ]{1,80}$/.test(text)) {
-        hud.setStatus("Sequence model was uncertain; review the held-letter spelling.", "warn");
+        hud.setStatus("Sequence model was uncertain. Please sign again or add letters manually.", "warn");
         return;
       }
+      if (liveGenerating) { pendingTranscripts.push(text); return; }
       letters = [...text];
       hud.renderSpelling(letters);
-      hud.setStatus(`First-place sequence model: ${text} (${Math.round(match.score * 100)}%). Review or correct before speaking.`, "success");
-      scheduleLiveGeneration();
+      hud.setStatus(`Fingerspelling detected: ${text} (${Math.round(match.score * 100)}%). Speaking automatically.`, "success");
+      void flushLivePhrase(true);
     },
     onModelStatus(ready, message) {
-      hud.setStatus(ready ? "First-place ASL sequence model ready. A–Z live preview active." : `Sequence model unavailable (${message}); static-letter fallback active.`, ready ? "success" : "warn");
+      hud.setStatus(ready ? "ASL sequence model ready. A–Z handshape preview active." : `Sequence model unavailable (${message}); manual A–Z entry remains available.`, ready ? "success" : "warn");
     },
     onError(error) { hud.setStatus(`Vision error: ${error.message}`, "error"); }
   });
 
   const meet = new MeetAdapter({
-    async onCaption(caption) {
+    onCaption(caption) {
       if (isRecentSpokenCaption(caption)) return;
-      const revision = ++captionRevision;
       hud.showLatestCaption(caption);
       if (looksLikeQuestion(caption)) hud.setQuestion(caption, "caption");
-      try {
-        const refined = await refineMeetCaption(settings, caption);
-        if (revision !== captionRevision) return;
-        const cleaned = String(refined.result?.caption || "").trim();
-        if (!cleaned || cleaned.length > 320) return;
-        hud.showLatestCaption(cleaned);
-        if (refined.result?.is_question) hud.setQuestion(cleaned, "caption");
-      } catch { /* Keep Meet's caption when Gemma is unavailable. */ }
     }
   });
   meet.start();
-  hud.setLiveState("Always-live mode ready — start the camera", true);
-  hud.setStatus("ASL fingerspelling and Meet captions are ready.", "success");
+  hud.setLiveState("Always-live mode starting camera…", true);
+  hud.setStatus("Starting ASL camera and Meet captions…", "info");
+  startCamera();
 
   async function startCamera() {
     try {
@@ -114,63 +103,84 @@ async function boot() {
     manualEdited = true;
     hud.renderSpelling(letters);
     hud.setStatus(`Added ${letter} manually.`, "success");
-    scheduleLiveGeneration();
+    scheduleLiveGeneration(1200);
   }
-  function addSpace() { if (letters.length && letters.at(-1) !== " ") letters.push(" "); manualEdited = true; hud.renderSpelling(letters); scheduleLiveGeneration(); }
-  function backspace() { letters.pop(); manualEdited = true; hud.renderSpelling(letters); scheduleLiveGeneration(); }
+  function addSpace() { if (letters.length && letters.at(-1) !== " ") letters.push(" "); manualEdited = true; hud.renderSpelling(letters); scheduleLiveGeneration(1200); }
+  function backspace() { letters.pop(); manualEdited = true; hud.renderSpelling(letters); scheduleLiveGeneration(1200); }
   function clearLetters() { cancelLiveTimer(); letters = []; manualEdited = false; hud.renderSpelling(letters); hud.setStatus("Current spelling cleared.", "info"); }
 
-  function scheduleLiveGeneration() {
+  function scheduleLiveGeneration(delayMs = 450) {
     if (!letters.some((character) => character !== " ") || handsPresent || liveGenerating) return;
     cancelLiveTimer();
     hud.setLiveState("Hand lowered — preparing the spelled text", true);
-    liveTimer = setTimeout(flushLivePhrase, Math.max(settings.livePauseMs || 0, 2000));
+    liveTimer = setTimeout(flushLivePhrase, delayMs);
   }
 
-  async function flushLivePhrase() {
+  async function flushLivePhrase(ignoreHands = false) {
     liveTimer = null;
-    if (handsPresent || liveGenerating) return;
+    if (liveGenerating) return;
+    if (handsPresent && !ignoreHands) return;
     const snapshot = [...letters];
     const literal = snapshot.join("").trim().replace(/\s+/g, " ");
     if (!literal) return;
     liveGenerating = true;
-    let answer = literal;
-    hud.setLiveState("Rendering fingerspelled text…", true);
-    try {
-      const response = await renderSpelling(settings, literal);
+    hud.setAnswer(literal);
+    hud.setLiveState("Speaking the detected spelling…", true);
+    const speech = speakText(literal);
+    const delivery = meet.sendChatMessage(`🤟 Candidate via SignBridge: ${literal}`);
+    void renderSpelling(settings, literal).then((response) => {
       const rendered = String(response.result?.answer || "").trim();
-      if (sameLetters(rendered, literal)) answer = rendered;
+      if (hud.getAnswer() === literal && sameLetters(rendered, literal)) hud.setAnswer(rendered);
       hud.setMetrics(response.metrics);
-    } catch { hud.setStatus("Gemma 4 unavailable; using literal fingerspelling.", "warn"); }
-    hud.setAnswer(answer);
-    speakText(answer);
-    let delivered = false;
-    let deliveryError;
-    try { await meet.sendChatMessage(`🤟 Candidate via SignBridge: ${answer}`); delivered = true; }
-    catch (error) { deliveryError = error; }
+    }).catch(() => {});
+    const [spoken, delivered] = await Promise.allSettled([speech, delivery]);
     if (snapshot.every((character, index) => letters[index] === character)) letters.splice(0, snapshot.length);
-    manualEdited = false;
+    manualEdited = letters.length > 0;
     hud.renderSpelling(letters);
-    hud.setLiveState("Spoken — ready for the next spelling", true);
-    hud.setStatus(delivered ? "Spoken locally and sent in Meet chat." : `Spoken locally. ${deliveryError?.message || "Meet chat delivery unavailable."}`, delivered ? "success" : "warn");
+    hud.setLiveState("Ready for the next spelling", true);
+    const speechOk = spoken.status === "fulfilled";
+    const chatOk = delivered.status === "fulfilled";
+    hud.setStatus(speechOk
+      ? (chatOk ? "Spoken automatically and sent in Meet chat." : `Spoken automatically. Meet chat: ${delivered.reason?.message || "unavailable"}`)
+      : `Audio failed: ${spoken.reason?.message || "speech unavailable"}. ${chatOk ? "Text sent in Meet chat." : "Meet chat also unavailable."}`,
+    speechOk && chatOk ? "success" : "warn");
     liveGenerating = false;
-    if (letters.length && !handsPresent) scheduleLiveGeneration();
+    if (pendingTranscripts.length && !manualEdited) {
+      letters = [...pendingTranscripts.shift()];
+      hud.renderSpelling(letters);
+      void flushLivePhrase(true);
+    } else if (letters.length && !handsPresent) scheduleLiveGeneration();
   }
 
   function cancelLiveTimer() { if (liveTimer) clearTimeout(liveTimer); liveTimer = null; }
-  function speakText(text) {
+  async function speakText(text) {
     lastSpokenText = text; lastSpokenAt = Date.now();
-    speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-IN"; utterance.rate = settings.speechRate;
-    speechSynthesis.speak(utterance);
+    try {
+      await new Promise((resolve, reject) => chrome.runtime.sendMessage({
+        type: "SIGNBRIDGE_SPEAK", text, rate: settings.speechRate
+      }, (response) => {
+        const error = chrome.runtime.lastError;
+        if (error || !response?.ok) reject(new Error(error?.message || response?.error || "Chrome TTS failed"));
+        else resolve();
+      }));
+    } catch (error) {
+      if (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) throw error;
+      await new Promise((resolve, reject) => {
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        const timeout = setTimeout(() => reject(error), 3000);
+        utterance.lang = "en-US"; utterance.rate = settings.speechRate;
+        utterance.onstart = () => { clearTimeout(timeout); resolve(); };
+        utterance.onerror = (event) => { clearTimeout(timeout); reject(new Error(event.error || error.message)); };
+        speechSynthesis.speak(utterance);
+      });
+    }
   }
   function isRecentSpokenCaption(caption) {
     if (!lastSpokenText || Date.now() - lastSpokenAt > 15000) return false;
     const observed = normalizePhrase(caption), spoken = normalizePhrase(lastSpokenText);
     return observed.length > 10 && (observed.includes(spoken) || spoken.includes(observed));
   }
-  function speak() { const answer = hud.getAnswer(); if (answer) speakText(answer); }
   async function copy() { const answer = hud.getAnswer(); if (answer) await navigator.clipboard.writeText(answer); }
   function insertChat() {
     const answer = hud.getAnswer(); if (!answer) return;

@@ -9,6 +9,8 @@ let kaggle;
 let lastPreview = "";
 let rows = [];
 let lastHandAt = 0;
+let pendingGap = [];
+let inferenceQueue = Promise.resolve();
 
 function reply(message) { window.parent.postMessage(message, "*"); }
 const baseUrl = new URL(".", document.currentScript.src).href;
@@ -42,16 +44,16 @@ function transcribe() {
   if (!kaggle || rows.length < 12) { rows = []; return; }
   const sequence = rows;
   rows = [];
-  try {
-    const result = kaggle.transcribe(sequence);
+  inferenceQueue = inferenceQueue.then(async () => {
+    const result = await kaggle.transcribe(sequence);
     reply({ type: "SIGNBRIDGE_TRANSCRIPT", ...result, frames: sequence.length });
-  } catch (error) { reply({ type: "SIGNBRIDGE_KAGGLE_ERROR", message: error?.message || String(error) }); }
+  }).catch((error) => reply({ type: "SIGNBRIDGE_VISION_ERROR", message: error?.message || String(error) }));
 }
 
 window.addEventListener("message", (event) => {
   if (event.source !== window.parent) return;
   if (event.data?.type === "SIGNBRIDGE_VISION_RESET") {
-    decoder?.reset(); lastPreview = ""; rows = []; lastHandAt = 0;
+    decoder?.reset(); lastPreview = ""; rows = []; pendingGap = []; lastHandAt = 0;
     return;
   }
   if (event.data?.type !== "SIGNBRIDGE_VISION_FRAME" || !landmarker) return;
@@ -68,8 +70,14 @@ window.addEventListener("message", (event) => {
       reply({ type: "SIGNBRIDGE_LETTER_PREVIEW", gloss: decoded.preview });
     }
     if (kaggle) {
-      if (hands.length) { lastHandAt = timestamp; rows.push(kaggleFrame(result, kaggle.columns)); }
-      else if (rows.length && timestamp - lastHandAt < 700) rows.push(kaggleFrame(result, kaggle.columns));
+      if (hands.length) {
+        if (rows.length) rows.push(...pendingGap);
+        pendingGap = [];
+        lastHandAt = timestamp;
+        rows.push(kaggleFrame(result, kaggle.columns));
+      } else if (rows.length && timestamp - lastHandAt < 700) {
+        pendingGap.push(kaggleFrame(result, kaggle.columns));
+      }
       if (rows.length > 600) rows.shift();
     }
     reply({
@@ -77,7 +85,10 @@ window.addEventListener("message", (event) => {
       landmarks: hands.map((hand) => hand.points),
       handedness: hands.map((hand) => [{ categoryName: hand.side, score: 1 }])
     });
-    if (!hands.length && rows.length && timestamp - lastHandAt >= 700) transcribe();
+    if (!hands.length && rows.length && timestamp - lastHandAt >= 700) {
+      pendingGap = [];
+      transcribe();
+    }
   } catch (error) { reply({ type: "SIGNBRIDGE_VISION_ERROR", message: error?.message || String(error) }); }
   finally { bitmap?.close?.(); }
 });

@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "SignBridge AI",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "A Gemma 4-powered, candidate-controlled sign and speech bridge for Google Meet interviews.",
   "permissions": [
     "storage",
-    "clipboardWrite"
+    "clipboardWrite",
+    "tts"
   ],
   "host_permissions": [
     "http://localhost:11434/*",
@@ -25,7 +26,6 @@
     {
       "matches": ["https://meet.google.com/*"],
       "js": ["content.js"],
-      "css": ["hud.css"],
       "run_at": "document_idle"
     }
   ],

@@ -66,13 +66,11 @@ export class SignBridgeHud {
           </section>
 
           <section class="sb-section">
-            <div class="sb-section-title"><span>4</span> Candidate review</div>
-            <textarea id="sb-answer" rows="3" placeholder="Spelled text appears here for review…"></textarea>
-            <label class="sb-check"><input id="sb-approved" type="checkbox"> I reviewed and approve this wording</label>
+            <div class="sb-section-title"><span>4</span> Spoken text</div>
+            <textarea id="sb-answer" rows="3" placeholder="Completed spelling is spoken automatically…"></textarea>
             <div class="sb-row sb-wrap">
-              <button id="sb-speak" disabled>Speak</button>
               <button id="sb-copy" disabled>Copy</button>
-              <button id="sb-chat" disabled>Insert in Meet chat</button>
+              <button id="sb-chat" disabled>Insert in Meet chat again</button>
             </div>
             <div id="sb-metrics" class="sb-muted"></div>
           </section>
@@ -107,7 +105,6 @@ export class SignBridgeHud {
       "#sb-space": "addSpace",
       "#sb-backspace": "backspace",
       "#sb-clear-glosses": "clearLetters",
-      "#sb-speak": "speak",
       "#sb-copy": "copy",
       "#sb-chat": "insertChat",
       "#sb-save-settings": "saveSettings",
@@ -116,12 +113,8 @@ export class SignBridgeHud {
     for (const [selector, handler] of Object.entries(actions)) {
       this.$(selector).addEventListener("click", () => this.handlers[handler]?.());
     }
-    this.$("#sb-approved").addEventListener("change", (event) => this.setApproved(event.target.checked));
     this.$("#sb-question").addEventListener("input", (event) => this.handlers.questionChanged?.(event.target.value.trim()));
-    this.$("#sb-answer").addEventListener("input", () => {
-      this.$("#sb-approved").checked = false;
-      this.setApproved(false);
-    });
+    this.$("#sb-answer").addEventListener("input", () => this.setAnswerActions());
     this.$("#sb-collapse").addEventListener("click", () => {
       const body = this.$("#sb-body");
       body.hidden = !body.hidden;
@@ -191,39 +184,19 @@ export class SignBridgeHud {
     this.$("#sb-detected").textContent = `Hold / change to accept: ${letter}`;
   }
 
-  showWordSuggestions(candidates, onChoose, current = "") {
-    const container = this.$("#sb-word-suggestions");
-    container.replaceChildren();
-    const choices = (candidates || []).filter((item) => item.gloss && item.gloss !== current).slice(0, 3);
-    container.hidden = choices.length === 0;
-    for (const { gloss, score } of choices) {
-      const button = document.createElement("button");
-      button.className = "sb-chip";
-      button.textContent = `Use ${gloss} · ${Math.round(score * 100)}%`;
-      button.addEventListener("click", () => onChoose(gloss));
-      container.appendChild(button);
-    }
-  }
-
-  setCalibrationState(message, progress = 0) {
-    this.$("#sb-calibration-state").textContent = progress ? `${message} ${Math.round(progress * 100)}%` : message;
-  }
-
   renderSpelling(letters) {
     const container = this.$("#sb-gloss-buffer");
     container.textContent = letters.length ? letters.join("") : "Spelled letters appear here";
   }
 
-  setAnswer(answer, needsClarification = false) {
+  setAnswer(answer) {
     this.$("#sb-answer").value = answer;
-    this.$("#sb-approved").checked = false;
-    this.setApproved(false);
-    if (needsClarification) this.setStatus("Gemma needs clarification. Review the literal answer before approving.", "warn");
+    this.setAnswerActions();
   }
 
-  setApproved(approved) {
-    const enabled = approved && Boolean(this.getAnswer());
-    ["#sb-speak", "#sb-copy", "#sb-chat"].forEach((selector) => { this.$(selector).disabled = !enabled; });
+  setAnswerActions() {
+    const enabled = Boolean(this.getAnswer());
+    ["#sb-copy", "#sb-chat"].forEach((selector) => { this.$(selector).disabled = !enabled; });
   }
 
   setMetrics(metrics) {
