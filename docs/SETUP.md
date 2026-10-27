@@ -8,7 +8,7 @@
 
 ## Demo
 
-Keep your face, shoulders, and signing hand in frame. Fingerspell **H E L L O**, pausing or briefly releasing between repeated letters. The sequence model processes the full segment after you lower your hand for about 0.7 seconds. Segments shorter than 15 frames are ignored. A confident result is spoken automatically and sent to Meet chat. There is no Speak button or approval step.
+Keep your face, shoulders, and signing hand in frame. Fingerspell **H E L L O** continuously, pausing briefly between letters and lowering your hand only after the whole word. The sequence model processes the segment after your hand is out of view for about 0.7 seconds. Segments shorter than 30 tracked frames are discarded with a status hint. A confident result is spoken automatically and sent to Meet chat. There is no Speak button or approval step.
 
 ## Troubleshooting
 

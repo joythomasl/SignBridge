@@ -53,6 +53,10 @@ async function boot() {
         hud.setStatus(`Sequence too short (${frameDetails}); hold the spelling longer.`, "warn");
         return;
       }
+      if (isKaggleDummy(text)) {
+        hud.setStatus(`Model rejected this ${match.frames}-frame segment (${confidence}). Keep spelling the whole word continuously, then lower your hand.`, "warn");
+        return;
+      }
       if (!/^[A-Z ]{1,80}$/.test(text)) {
         hud.setStatus(`Model output was not A–Z text: “${text.slice(0, 24) || "(empty)"}” (${confidence}; ${frameDetails}).`, "warn");
         return;
@@ -66,6 +70,9 @@ async function boot() {
       hud.renderSpelling(letters);
       hud.setStatus(`Fingerspelling detected: ${text} (${Math.round(match.score * 100)}%). Speaking automatically.`, "success");
       void flushLivePhrase(true);
+    },
+    onShortSequence({ frames, minimum }) {
+      hud.setStatus(`Only ${frames} tracked frames; this model needs at least ${minimum}. Spell the whole word before lowering your hand.`, "warn");
     },
     onModelStatus(ready, message) {
       hud.setStatus(ready ? "First-place ASL sequence model ready." : `Sequence model unavailable (${message}); manual A–Z entry remains available.`, ready ? "success" : "warn");
@@ -213,5 +220,6 @@ async function boot() {
 }
 
 function normalizePhrase(value) { return String(value || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim(); }
+function isKaggleDummy(value) { return normalizePhrase(value) === "2 a e aroe"; }
 function sameLetters(a, b) { return normalizePhrase(a) === normalizePhrase(b); }
 function looksLikeQuestion(value) { return /\b(what|why|how|when|where|who|which|can|could|would|will|do|does|did|have|has|tell|describe|explain|please|walk)\b/.test(normalizePhrase(value)); }

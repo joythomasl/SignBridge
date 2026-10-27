@@ -17,13 +17,14 @@ function colorForPoint(index) {
 }
 
 export class VisionController {
-  constructor({ video, canvas, fps = 15, onVector, onTranscript, onModelStatus, onError }) {
+  constructor({ video, canvas, fps = 15, onVector, onTranscript, onShortSequence, onModelStatus, onError }) {
     this.video = video;
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
     this.fps = fps;
     this.onVector = onVector;
     this.onTranscript = onTranscript;
+    this.onShortSequence = onShortSequence;
     this.onModelStatus = onModelStatus;
     this.onError = onError;
     this.frame = null;
@@ -137,6 +138,10 @@ export class VisionController {
     if (message.type === "SIGNBRIDGE_KAGGLE_ERROR") {
       this.modelInfo.kaggleReady = false;
       this.onModelStatus?.(false, message.message);
+      return;
+    }
+    if (message.type === "SIGNBRIDGE_SHORT_SEQUENCE") {
+      this.onShortSequence?.(message);
       return;
     }
     if (!this.running && message.type !== "SIGNBRIDGE_VISION_ERROR") return;

@@ -8,6 +8,7 @@ let rows = [];
 let lastHandAt = 0;
 let pendingGap = [];
 let inferenceQueue = Promise.resolve();
+const MIN_SEQUENCE_FRAMES = 30;
 
 function reply(message) { window.parent.postMessage(message, "*"); }
 const baseUrl = new URL(".", document.currentScript.src).href;
@@ -36,10 +37,13 @@ async function initialize() {
 }
 
 function transcribe() {
-  // The first-place release emits its dummy phrase below max_len_for_dummy=15.
-  if (!kaggle || rows.length < 15) { rows = []; return; }
+  if (!kaggle) { rows = []; return; }
   const sequence = rows;
   rows = [];
+  if (sequence.length < MIN_SEQUENCE_FRAMES) {
+    reply({ type: "SIGNBRIDGE_SHORT_SEQUENCE", frames: sequence.length, minimum: MIN_SEQUENCE_FRAMES });
+    return;
+  }
   inferenceQueue = inferenceQueue.then(async () => {
     const result = await kaggle.transcribe(sequence);
     reply({ type: "SIGNBRIDGE_TRANSCRIPT", ...result, frames: sequence.length });
