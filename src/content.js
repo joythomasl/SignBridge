@@ -43,8 +43,22 @@ async function boot() {
     },
     onTranscript(match) {
       const text = String(match.text || "").toUpperCase().trim();
-      if (manualEdited || match.frames < 15 || match.score < 0.65 || !/^[A-Z ]{1,80}$/.test(text)) {
-        hud.setStatus("Sequence model was uncertain. Please sign again or add letters manually.", "warn");
+      const confidence = Number.isFinite(match.score) ? `${Math.round(match.score * 100)}%` : "unknown";
+      const frameDetails = `${match.frames || 0} frames; coordinates H/F/P ${match.coverage?.hand ?? "?"}/${match.coverage?.face ?? "?"}/${match.coverage?.pose ?? "?"}%`;
+      if (manualEdited) {
+        hud.setStatus("Model result ignored because you are editing letters manually.", "warn");
+        return;
+      }
+      if (match.frames < 15) {
+        hud.setStatus(`Sequence too short (${frameDetails}); hold the spelling longer.`, "warn");
+        return;
+      }
+      if (!/^[A-Z ]{1,80}$/.test(text)) {
+        hud.setStatus(`Model output was not A–Z text: “${text.slice(0, 24) || "(empty)"}” (${confidence}; ${frameDetails}).`, "warn");
+        return;
+      }
+      if (!Number.isFinite(match.score) || match.score < 0.65) {
+        hud.setStatus(`Model guess “${text}” was withheld (${confidence}; ${frameDetails}).`, "warn");
         return;
       }
       if (liveGenerating) { pendingTranscripts.push(text); return; }
@@ -73,7 +87,7 @@ async function boot() {
 
   async function startCamera() {
     try {
-      hud.setStatus("Loading local hand tracker and ASL alphabet…", "info");
+      hud.setStatus("Loading local hand tracker and Kaggle sequence model…", "info");
       await vision.start();
       hud.setCameraRunning(true);
       hud.setStatus(vision.modelInfo.kaggleReady

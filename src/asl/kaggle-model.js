@@ -48,6 +48,11 @@ export async function loadKaggleModel(url) {
     fetch(url("assets/asl/character_to_prediction_index.json")).then((response) => response.json())
   ]);
   if (schema.selected_columns?.length !== FEATURES) throw new Error("Invalid Kaggle feature schema");
+  const featureGroups = { face: [], hand: [], pose: [] };
+  schema.selected_columns.forEach((name, index) => {
+    const group = name.includes("_face_") ? "face" : name.includes("_pose_") ? "pose" : "hand";
+    featureGroups[group].push(index);
+  });
   tflite.setWasmPath(url("vendor/tflite/"));
   let runner = null;
   let currentFrames = 0;
@@ -74,7 +79,14 @@ export async function loadKaggleModel(url) {
       modelRunner.getInputs()[0].data().set(input);
       if (!modelRunner.infer()) throw new Error("TFLite inference failed");
       const output = modelRunner.getOutputs()[0];
-      return decodeFingerspelling(output.data(), output.shape, characterMap);
+      const result = decodeFingerspelling(output.data(), output.shape, characterMap);
+      const coverage = Object.fromEntries(Object.entries(featureGroups).map(([group, indexes]) => {
+        let present = 0;
+        for (const row of rows) for (const index of indexes) if (Number.isFinite(row[index])) present++;
+        const total = rows.length * indexes.length;
+        return [group, total ? Math.round((present / total) * 100) : 0];
+      }));
+      return { ...result, coverage };
     }
   };
 }
