@@ -61,12 +61,10 @@ async function boot() {
         hud.setStatus(`Model output was not A–Z text: “${text.slice(0, 24) || "(empty)"}” (${confidence}; ${frameDetails}).`, "warn");
         return;
       }
-      const exactSingleLetter = text.length === 1 && match.rawText?.trim().toUpperCase() === text && !match.constrainedTokens;
-      const confidenceFloor = exactSingleLetter ? 0.5 : 0.65;
-      if (!Number.isFinite(match.score) || match.score < confidenceFloor || match.constrainedTokens > 0) {
+      if (!Number.isFinite(match.score) || match.score < 0.65 || match.constrainedTokens > 0) {
         const raw = match.rawText && match.rawText !== text ? `; unrestricted model output “${match.rawText}” at ${Math.round((match.rawScore || 0) * 100)}%` : "";
         const constraint = match.constrainedTokens ? `; ${match.constrainedTokens} non-letter token(s) excluded` : "";
-        hud.setStatus(`Letter-only guess “${text}” was withheld (${confidence}; requires ${Math.round(confidenceFloor * 100)}%${constraint}${raw}; ${frameDetails}).`, "warn");
+        hud.setStatus(`Letter-only guess “${text}” was withheld (${confidence}${constraint}${raw}; ${frameDetails}).`, "warn");
         return;
       }
       if (liveGenerating) { pendingTranscripts.push(text); return; }
