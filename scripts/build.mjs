@@ -23,13 +23,7 @@ async function copyStatic() {
       { recursive: true }
     )
   ]);
-  await Promise.all([
-    rm(path.join(dist, "assets", "signs"), { recursive: true, force: true }),
-    rm(path.join(dist, "assets", "signs", "library"), { recursive: true, force: true }),
-    rm(path.join(dist, "assets", "signs", "fingerspelling"), { recursive: true, force: true }),
-    rm(path.join(dist, "assets", "signs", "fingerspelling-templates.json"), { force: true }),
-    rm(path.join(dist, "assets", "signs", "fingerspelling.json"), { force: true })
-  ]);
+  await rm(path.join(dist, "assets", "signs"), { recursive: true, force: true });
 }
 
 async function makeBuildOptions() {

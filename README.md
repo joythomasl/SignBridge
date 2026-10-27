@@ -7,11 +7,12 @@ A Chrome extension prototype for Google Meet that displays interviewer captions 
 - Displays detected Meet captions both in the interviewer panel and in a large overlay at the bottom of the screen. Gemma 4 conservatively cleans finalized captions.
 - Tracks both hands, upper-body pose and face landmarks locally with MediaPipe Holistic.
 - Recognizes **250 isolated ASL words** with a local ONNX model from [GestureSign](https://github.com/shashank11yadav/GestureSign). Motion is segmented into complete signs; low-confidence results are rejected instead of guessed.
+- Starts a segment when hands enter the frame, retains held handshapes, and requests at least 24 camera samples per second when the laptop can keep up. Alternative word guesses appear as correction buttons.
 - Uses a separate ASL static alphabet model from [SignBridge](https://github.com/mhmdtaha091/SignBridge) for **24 held letters**. A 1.5-second hold is required; letters are suppressed while a word is being recognized. J and Z require motion and are available through manual correction, not automatic recognition.
-- Accumulates accepted words, calls the configured **Gemma 4** model to render a short response, then speaks it through browser text-to-speech after the signer lowers their hands.
+- Accumulates accepted words, calls the configured **Gemma 4** model to form a short sentence from the signs alone, then speaks it through browser text-to-speech after the signer lowers their hands. No interviewer question is required.
 - Sends the same response through Meet chat when the chat control is available. The user can correct glosses and review the generated answer.
 
-The interviewer animation and the previous ISL runtime models have been removed from the extension package.
+The interviewer animation and the previous ISL runtime models have been removed from the extension package. The referenced [susilnem American-sign-Language project](https://github.com/susilnem/American-sign-Language) uses a CNN to group alphabet handshapes; it cannot replace the ASL word and motion model.
 
 ## Build and run
 
@@ -38,7 +39,7 @@ The supplied `MS-ASL.zip` contains class names, split annotations, and video URL
 
 ## Meet audio
 
-Browser `speechSynthesis` plays through the laptop's speakers. Chrome does not expose it as a Meet microphone track, so remote participants are **not guaranteed to hear it**. Meet chat is the extension's automatic remote delivery path. For remote audio, route system playback through a virtual microphone or loopback device and select that device in Meet.
+Browser `speechSynthesis` plays through the laptop's speakers. Chrome does not expose it as a Meet microphone track, so remote participants are **not guaranteed to hear it**. Meet chat is the extension's automatic remote delivery path. The extension opens the in-call messages panel, locates the visible composer, and confirms that the draft clears after Send; if this fails, it leaves the draft and reports the reason. For remote audio, route system playback through a virtual microphone or loopback device and select that device in Meet.
 
 ## Sources and licenses
 

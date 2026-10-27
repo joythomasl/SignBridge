@@ -47,11 +47,12 @@ export class SignBridgeHud {
               <canvas id="sb-canvas"></canvas>
               <div id="sb-detected" class="sb-detected">No gesture</div>
             </div>
+            <div id="sb-word-suggestions" class="sb-chips" hidden></div>
             <div class="sb-row">
               <button id="sb-start-camera" class="sb-primary">Start camera</button>
               <button id="sb-stop-camera" disabled>Stop</button>
             </div>
-            <div class="sb-live-banner"><strong>Live sign → audio always on</strong><small>Signs are spoken automatically after a short neutral pause.</small></div>
+            <div class="sb-live-banner"><strong>ASL signs → local speech + Meet chat</strong><small>Signed words form a sentence without needing an interviewer question.</small></div>
             <div id="sb-live-state" class="sb-muted" data-active="true">Waiting for camera and signs</div>
             <div id="sb-gloss-buffer" class="sb-chips sb-buffer"></div>
             <button id="sb-clear-glosses" class="sb-full-button">Clear current phrase</button>
@@ -184,6 +185,20 @@ export class SignBridgeHud {
     if (match?.unstable) label.textContent = "Hand moving · hold the sign steady";
     else if (!match?.gloss) label.textContent = match?.handPresent ? "Hand tracked · unknown sign" : "No hand";
     else label.textContent = `${match.gloss} · ${Math.round(match.score * 100)}%`;
+  }
+
+  showWordSuggestions(candidates, onChoose, current = "") {
+    const container = this.$("#sb-word-suggestions");
+    container.replaceChildren();
+    const choices = (candidates || []).filter((item) => item.gloss && item.gloss !== current).slice(0, 3);
+    container.hidden = choices.length === 0;
+    for (const { gloss, score } of choices) {
+      const button = document.createElement("button");
+      button.className = "sb-chip";
+      button.textContent = `Use ${gloss} · ${Math.round(score * 100)}%`;
+      button.addEventListener("click", () => onChoose(gloss));
+      container.appendChild(button);
+    }
   }
 
   setCalibrationState(message, progress = 0) {

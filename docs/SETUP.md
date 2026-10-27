@@ -21,15 +21,16 @@ The local ASL word, static alphabet, and MediaPipe Holistic models are included 
 ## Demo
 
 1. Speak a question into Meet and confirm that the caption appears in the panel and bottom overlay. You can type the question if Meet captions are unavailable.
-2. Sign one of the supported ASL words such as **HELLO**, **THANK YOU**, **YES**, **NO**, **THINK**, or **TIME**. Complete the motion and briefly pause; watch for the accepted word.
-3. Lower your hands for at least two seconds. Gemma 4 renders the captured glosses into a short response, local TTS speaks it, and Meet chat receives the same text when available.
+2. Sign one of the supported ASL words such as **HELLO**, **THANK YOU**, **YES**, **NO**, **THINK**, or **TIME**. Complete the motion and briefly pause; watch for the accepted word. If a different word appears, use the alternative word buttons before speaking.
+3. Lower your hands for at least two seconds. Gemma 4 forms a sentence from the captured signs even if no interviewer question was detected. Local TTS speaks it, and Meet chat receives the same text when available.
 4. If a sign is uncertain, repeat it or use **Recognition and manual correction**. The 250-word model does not cover arbitrary interview vocabulary.
 
 ## Limitations and troubleshooting
 
-- **No captions:** Meet captions must be on. Meet's DOM can change; type the question when capture fails.
+- **No captions:** Meet captions must be on. Meet's DOM can change; type the question when capture fails. Candidate sign-to-sentence does not require a question.
 - **Wrong word:** Keep your upper body and complete hands in frame, avoid a second person, and complete one sign before starting the next. The model may still make mistakes.
 - **Letters:** Hold a static ASL handshape for 1.5 seconds. J and Z need motion and are manual-only.
+- **Meet chat unavailable:** Open the in-call messages panel. The status now reports whether its composer or Send button was unavailable or whether a draft remained after Send. Manual **Insert in Meet chat** remains available.
 - **No remote audio:** Browser TTS is local. Use Meet chat for remote text or configure a virtual microphone/loopback source in Meet for remote audio.
 - **Gemma unavailable:** Confirm the model is installed and the Ollama launcher is running.
 - **Slow laptop:** Close other camera or GPU-heavy applications. The local Holistic tracker and Gemma 4 both need substantial CPU and memory.

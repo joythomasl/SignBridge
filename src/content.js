@@ -23,6 +23,7 @@ async function boot() {
   let captionRevision = 0;
   let lastSpokenText = "";
   let lastSpokenAt = 0;
+  let lastRecognizedIndex = -1;
 
   const hud = new SignBridgeHud({
     startCamera, stopCamera, addGloss, clearGlosses, speak, copy, insertChat,
@@ -37,14 +38,16 @@ async function boot() {
   function accept(match, kind) {
     if (!match?.gloss) return;
     glossBuffer.push(match.gloss);
+    lastRecognizedIndex = kind === "word" ? glossBuffer.length - 1 : -1;
     hud.renderGlosses(glossBuffer, removeGloss);
+    hud.showWordSuggestions(kind === "word" ? match.candidates : [], chooseSuggestion, match.gloss);
     hud.setDetected(match);
     hud.setStatus(`ASL ${kind} accepted: ${match.gloss} (${Math.round(match.score * 100)}%)`, "success");
     if (!handsPresent) scheduleLiveGeneration();
   }
 
   const vision = new VisionController({
-    video: hud.video, canvas: hud.canvas, fps: settings.inferenceFps,
+    video: hud.video, canvas: hud.canvas, fps: Math.max(settings.inferenceFps, 24),
     onVector(vector) {
       if (vector) {
         handsPresent = true;
@@ -62,6 +65,8 @@ async function boot() {
     onWord: (match) => accept(match, "word"),
     onLetter: (match) => accept(match, "letter"),
     onUncertain(match) {
+      lastRecognizedIndex = -1;
+      hud.showWordSuggestions(match?.candidates, chooseSuggestion);
       hud.setStatus(match?.reason === "partial"
         ? "Keep your shoulders and hands in frame, then repeat the word."
         : `ASL sign unclear${match?.gloss ? ` (closest: ${match.gloss})` : ""}. Repeat the complete word.`, "warn");
@@ -116,6 +121,8 @@ async function boot() {
 
   function removeGloss(index) {
     glossBuffer.splice(index, 1);
+    lastRecognizedIndex = -1;
+    hud.showWordSuggestions([], chooseSuggestion);
     hud.renderGlosses(glossBuffer, removeGloss);
     scheduleLiveGeneration();
   }
@@ -124,6 +131,8 @@ async function boot() {
     const gloss = hud.getCalibrationGloss();
     if (!gloss) return;
     glossBuffer.push(gloss);
+    lastRecognizedIndex = -1;
+    hud.showWordSuggestions([], chooseSuggestion);
     hud.renderGlosses(glossBuffer, removeGloss);
     hud.setStatus(`Added ${gloss} manually.`, "success");
     scheduleLiveGeneration();
@@ -132,8 +141,23 @@ async function boot() {
   function clearGlosses() {
     cancelLiveTimer();
     glossBuffer = [];
+    lastRecognizedIndex = -1;
+    hud.showWordSuggestions([], chooseSuggestion);
     hud.renderGlosses(glossBuffer, removeGloss);
     hud.setStatus("Current phrase cleared.", "info");
+  }
+
+  function chooseSuggestion(gloss) {
+    if (lastRecognizedIndex >= 0 && lastRecognizedIndex < glossBuffer.length) {
+      glossBuffer[lastRecognizedIndex] = gloss;
+    } else {
+      glossBuffer.push(gloss);
+    }
+    lastRecognizedIndex = -1;
+    hud.showWordSuggestions([], chooseSuggestion);
+    hud.renderGlosses(glossBuffer, removeGloss);
+    hud.setStatus(`Corrected ASL word to ${gloss}.`, "success");
+    scheduleLiveGeneration();
   }
 
   function scheduleLiveGeneration() {
@@ -146,17 +170,12 @@ async function boot() {
   async function flushLivePhrase() {
     liveTimer = null;
     if (!glossBuffer.length || handsPresent || liveGenerating) return;
-    const question = hud.getQuestion() || latestCaption;
-    if (!question) {
-      hud.setLiveState("Waiting for the interviewer question", true);
-      return;
-    }
     const phrase = [...glossBuffer];
     liveGenerating = true;
     let completed = false;
     hud.setLiveState("Gemma 4 is rendering the signed meaning…", true);
     try {
-      const response = await generateAnswer(settings, question, collapseFingerspelling(phrase));
+      const response = await generateAnswer(settings, collapseFingerspelling(phrase));
       const answer = String(response.result?.answer || "").trim();
       if (!answer) throw new Error("Gemma returned an empty answer");
       hud.setAnswer(answer, Boolean(response.result.needs_clarification));
@@ -167,19 +186,22 @@ async function boot() {
       }
       speakText(answer);
       let delivered = false;
+      let deliveryError = null;
       try {
         await meet.sendChatMessage(`🤟 Candidate via SignBridge: ${answer}`);
         delivered = true;
-      } catch {
-        // Chat delivery depends on Meet's visible chat controls.
+      } catch (error) {
+        deliveryError = error;
       }
       if (phrase.every((gloss, index) => glossBuffer[index] === gloss)) glossBuffer.splice(0, phrase.length);
+      lastRecognizedIndex = -1;
+      hud.showWordSuggestions([], chooseSuggestion);
       completed = true;
       hud.renderGlosses(glossBuffer, removeGloss);
       hud.setLiveState("Spoken — listening for the next phrase", true);
       hud.setStatus(delivered
         ? "Spoken locally and sent in Meet chat."
-        : "Spoken locally. Meet chat delivery is unavailable.", delivered ? "success" : "warn");
+        : `Spoken locally. ${deliveryError?.message || "Meet chat delivery is unavailable."}`, delivered ? "success" : "warn");
     } catch (error) {
       hud.setStatus(`Gemma 4 unavailable: ${error.message}. Nothing was spoken.`, "warn");
     } finally {

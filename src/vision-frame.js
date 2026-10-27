@@ -10,7 +10,7 @@ let session;
 let labels = [];
 let alphabet;
 let busy = false;
-const segmenter = new Segmenter({ gapMs: 420, minFrames: 8 });
+const segmenter = new Segmenter({ gapMs: 850, minFrames: 8 });
 let lastLetter = "";
 let letterSince = 0;
 let lastAcceptedLetter = "";
@@ -58,7 +58,13 @@ function softmaxBest(logits) {
   const total = scores.reduce((sum, value) => sum + value.score, 0);
   scores.sort((a, b) => b.score - a.score);
   const best = scores[0];
-  return { gloss: best?.item.label?.toUpperCase(), score: best?.score / total || 0 };
+  return {
+    gloss: best?.item.label?.toUpperCase(),
+    score: best?.score / total || 0,
+    candidates: scores.slice(0, 3).map(({ item, score }) => ({
+      gloss: item.label.toUpperCase(), score: score / total
+    }))
+  };
 }
 
 async function inferWord(segment) {

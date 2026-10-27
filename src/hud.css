@@ -150,6 +150,7 @@ button:hover:not(:disabled) { background: #20454c; border-color: rgba(116, 237, 
 .sb-sign-placeholder { display: grid; place-items: center; height: 100%; padding: 22px; color: #8ea8a6; text-align: center; font-size: 12px; }
 .sb-sign-caption { padding: 8px 1px 2px; color: #f3fffd; font-size: 13px; line-height: 1.35; }
 .sb-interviewer-caption { min-height: 110px; display: flex; align-items: center; padding: 18px; border: 1px solid #315557; border-radius: 12px; background: #07191d; color: #f3fffd; font-size: 18px; line-height: 1.45; overflow-wrap: anywhere; }
+.sb-chips[hidden] { display: none; }
 
 .sb-calibration { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .sb-full-button { width: 100%; margin-top: 8px; }

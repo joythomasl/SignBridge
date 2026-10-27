@@ -9,6 +9,25 @@ function isVisible(element) {
   return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
 }
 
+function deepQueryAll(selector, root = document) {
+  const found = [...root.querySelectorAll(selector)];
+  for (const element of root.querySelectorAll("*")) {
+    if (element.shadowRoot) found.push(...deepQueryAll(selector, element.shadowRoot));
+  }
+  return found;
+}
+
+function belongsToSignBridge(element) {
+  if (element.closest?.("#signbridge-root")) return true;
+  const root = element.getRootNode?.();
+  return root instanceof ShadowRoot && root.host?.closest?.("#signbridge-root");
+}
+
+function inputText(input) {
+  return normalizeText(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+    ? input.value : input.textContent);
+}
+
 export class MeetAdapter {
   constructor({ onCaption }) {
     this.onCaption = onCaption;
@@ -89,7 +108,10 @@ export class MeetAdapter {
   insertChatDraft(text) {
     const input = this.findChatInput();
     if (!input) {
-      throw new Error("Open the Meet chat panel, then try Insert again.");
+      throw new Error("Meet chat composer was not found. Open in-call messages and try again.");
+    }
+    if (inputText(input) && inputText(input) !== text) {
+      throw new Error("Meet chat already contains an unsent draft. Clear or send it first.");
     }
 
     input.focus();
@@ -102,40 +124,75 @@ export class MeetAdapter {
       range.selectNodeContents(input);
       selection.removeAllRanges();
       selection.addRange(range);
-      document.execCommand("insertText", false, text);
+      if (!document.execCommand("insertText", false, text)) {
+        input.textContent = text;
+      }
     }
     input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
+    if (inputText(input) !== normalizeText(text)) throw new Error("Meet did not accept the chat draft.");
     return true;
   }
 
   findChatInput() {
     const selectors = [
-      'div[contenteditable="true"][role="textbox"]',
-      'textarea[aria-label*="message" i]',
-      'textarea[placeholder*="message" i]'
+      'div[contenteditable="true"]',
+      'textarea',
+      'input[type="text"]',
+      '[role="textbox"]'
     ];
-    const candidates = selectors.flatMap((selector) => [...document.querySelectorAll(selector)]);
-    return candidates.find((element) => isVisible(element) && !element.closest("#signbridge-root")) || null;
+    const candidates = [...new Set(selectors.flatMap((selector) => deepQueryAll(selector)))];
+    return candidates
+      .filter((element) => isVisible(element) && !belongsToSignBridge(element) && !element.disabled && !element.readOnly)
+      .map((element) => {
+        const attributes = [element.getAttribute("aria-label"), element.getAttribute("placeholder"),
+          element.getAttribute("data-placeholder"), element.getAttribute("title")].join(" ").toLowerCase();
+        const parent = element.closest('[role="dialog"], [role="region"], form') || element.parentElement;
+        const context = [parent?.getAttribute("aria-label"), parent?.textContent?.slice(0, 250)].join(" ").toLowerCase();
+        const score = (/message|chat/.test(attributes) ? 10 : 0)
+          + (/message|chat/.test(context) ? 4 : 0)
+          + (element.getAttribute("contenteditable") === "true" ? 2 : 0);
+        return { element, score };
+      })
+      .filter(({ score }) => score >= 4)
+      .sort((a, b) => b.score - a.score)[0]?.element || null;
   }
 
   async sendChatMessage(text) {
     if (!this.findChatInput()) {
-      const chatButton = [...document.querySelectorAll('button[aria-label*="chat" i], button[data-tooltip*="chat" i]')]
-        .find((button) => isVisible(button) && !button.closest("#signbridge-root"));
+      const chatButton = deepQueryAll('button, [role="button"]')
+        .find((button) => isVisible(button) && !belongsToSignBridge(button)
+          && /chat|in.call messages|messages/i.test([
+            button.getAttribute("aria-label"), button.getAttribute("data-tooltip"),
+            button.getAttribute("title"), button.textContent?.slice(0, 60)
+          ].join(" ")));
       chatButton?.click();
       const startedAt = performance.now();
-      while (!this.findChatInput() && performance.now() - startedAt < 2500) {
+      while (!this.findChatInput() && performance.now() - startedAt < 4500) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
     this.insertChatDraft(text);
     const input = this.findChatInput();
     if (!input) throw new Error("Meet chat input is not open.");
-    const sendButton = [...document.querySelectorAll('button[aria-label*="send" i]')]
-      .find((button) => isVisible(button) && !button.closest("#signbridge-root"));
-    if (sendButton) sendButton.click();
-    else input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    const sendButtons = deepQueryAll('button, [role="button"]')
+      .filter((button) => isVisible(button) && !belongsToSignBridge(button)
+        && /send/i.test([button.getAttribute("aria-label"), button.getAttribute("title"),
+          button.getAttribute("data-tooltip"), button.textContent?.slice(0, 60)].join(" ")));
+    const nearest = sendButtons
+      .map((button) => ({ button, common: input.parentElement?.contains(button)
+        || input.parentElement?.parentElement?.contains(button)
+        || input.parentElement?.parentElement?.parentElement?.contains(button) }))
+      .sort((a, b) => Number(b.common) - Number(a.common))[0]?.button;
+    if (!nearest || nearest.disabled || nearest.getAttribute("aria-disabled") === "true") {
+      throw new Error("Meet chat draft is ready, but its Send button is unavailable.");
+    }
+    nearest.click();
+    const startedAt = performance.now();
+    while (inputText(input) && performance.now() - startedAt < 1800) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (inputText(input)) throw new Error("Meet did not confirm chat delivery; the draft remains in the composer.");
     return true;
   }
 }

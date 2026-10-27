@@ -13,7 +13,7 @@ export function checkGemma(settings) {
   return runtimeMessage({ type: "GEMMA_HEALTH", settings });
 }
 
-export function generateAnswer(settings, question, glosses) {
+export function generateAnswer(settings, glosses) {
   const schema = {
     type: "object",
     properties: {
@@ -27,8 +27,8 @@ export function generateAnswer(settings, question, glosses) {
   const system = [
     "You are the constrained language renderer in an accessibility prototype.",
     "Return JSON only and obey the supplied schema.",
-    "Write one first-person English sentence of at most 20 words.",
-    "Use only facts explicitly represented by the glosses. The question supplies context, not facts about the candidate.",
+    "Form one natural English sentence of at most 20 words from the signed glosses alone.",
+    "Use only facts explicitly represented by the glosses. No interviewer question or outside context is available.",
     "Never add companies, technologies, achievements, metrics, methods, durations, or examples absent from the glosses.",
     "Preserve numbers and negation exactly.",
     "If meaning is insufficient, set needs_clarification true and keep the answer literal."
@@ -40,7 +40,7 @@ export function generateAnswer(settings, question, glosses) {
     schema,
     messages: [
       { role: "system", content: system },
-      { role: "user", content: JSON.stringify({ question, glosses }) }
+      { role: "user", content: JSON.stringify({ glosses }) }
     ]
   });
 }

@@ -130,6 +130,7 @@ export class VisionController {
       this.resolveInitialize?.();
       return;
     }
+    if (!this.running && message.type !== "SIGNBRIDGE_VISION_ERROR") return;
     if (message.type === "SIGNBRIDGE_WORD_RESULT") { this.onWord?.(message); return; }
     if (message.type === "SIGNBRIDGE_LETTER_RESULT") { this.onLetter?.(message); return; }
     if (message.type === "SIGNBRIDGE_WORD_UNCERTAIN") { this.onUncertain?.(message); return; }

@@ -65,8 +65,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           format: message.schema,
           keep_alive: "30m",
           options: {
-            num_predict: 96,
-            temperature: 0.2,
+            num_predict: 192,
+            temperature: 0,
             top_p: 0.9
           }
         };

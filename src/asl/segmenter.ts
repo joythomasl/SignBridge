@@ -105,6 +105,7 @@ export class Segmenter {
   private quietReason: 'absent' | 'still' = 'absent';
   /** The open segment started from a still hold (state 'resting'). */
   private fromRest = false;
+  private fromAppearance = false;
   state: SegmenterState = 'idle';
 
   constructor(options: Partial<SegmenterOptions> = {}) {
@@ -118,6 +119,7 @@ export class Segmenter {
     this.speed = 0;
     this.quietSince = null;
     this.fromRest = false;
+    this.fromAppearance = false;
     this.state = 'idle';
   }
 
@@ -125,6 +127,7 @@ export class Segmenter {
   push(frame: Frame, t: number, flags: { crowded?: boolean } = {}): SegmentEvent | null {
     const sample = { frame, t };
     const present = !flags.crowded && !handsMissing(frame);
+    const appeared = present && (!this.last || handsMissing(this.last.frame));
     if (present && this.last && !handsMissing(this.last.frame)) {
       // Light smoothing so one jittery frame neither starts nor ends a sign.
       this.speed = 0.5 * this.speed + 0.5 * handSpeed(this.last, sample);
@@ -139,8 +142,11 @@ export class Segmenter {
       this.recent = present
         ? [...this.recent, sample].filter((s) => t - s.t <= this.opts.prerollMs)
         : [];
-      if (!moving) return null;
+      // A word may begin as the hands enter the camera and then settle into a
+      // held shape. Waiting for inter-frame movement loses that first sign.
+      if (!moving && !appeared) return null;
       this.fromRest = this.state === 'resting';
+      this.fromAppearance = appeared;
       this.state = 'signing';
       this.samples = [...this.recent];
       this.quietSince = null;
@@ -162,7 +168,8 @@ export class Segmenter {
       this.quietSince = t;
       this.quietReason = present ? 'still' : 'absent';
     }
-    if (t - this.quietSince < this.opts.gapMs) return null;
+    const requiredGap = this.quietReason === 'absent' ? Math.min(this.opts.gapMs, 320) : this.opts.gapMs;
+    if (t - this.quietSince < requiredGap) return null;
     // Keep frames up to the start of the quiet gap; a still hold keeps its first frame.
     const quietStart = this.quietSince;
     const keep = this.samples.filter((s) => s.t < quietStart).length;
@@ -175,7 +182,9 @@ export class Segmenter {
         return { type: 'discard', reason: 'hands-leaving' };
       }
     }
-    const event = this.finish(reason, reason === 'still' ? keep + 1 : keep);
+    const event = this.finish(reason, reason === 'still'
+      ? (this.fromAppearance ? this.samples.length : keep + 1)
+      : keep);
     this.state = present ? 'resting' : 'idle';
     return event;
   }
@@ -194,6 +203,7 @@ export class Segmenter {
     const kept = this.samples.slice(0, Math.max(0, keep));
     this.samples = [];
     this.quietSince = null;
+    this.fromAppearance = false;
     this.state = 'idle';
     if (kept.length < this.opts.minFrames) return { type: 'discard', reason: 'too-short' };
     const first = kept[0]?.t ?? 0;

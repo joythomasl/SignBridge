@@ -13,7 +13,7 @@ await mkdir(path.dirname(artifactPath), { recursive: true });
 
 const context = await chromium.launchPersistentContext(profilePath, {
   executablePath: chromium.executablePath(),
-  headless: false,
+  headless: true,
   ignoreDefaultArgs: ["--disable-extensions"],
   args: [
     `--disable-extensions-except=${extensionPath}`,
@@ -42,7 +42,12 @@ try {
   console.log(`Extension origin: ${initialOrigin}`);
   const status = panel.locator("#sb-status");
   await panel.locator("#sb-start-camera").click();
-  await status.filter({ hasText: "Camera ready" }).waitFor({ timeout: 30000 });
+  try {
+    await status.filter({ hasText: "Camera ready" }).waitFor({ timeout: 45000 });
+  } catch (error) {
+    console.error(`Camera status: ${await status.textContent()}`);
+    throw error;
+  }
   await page.waitForTimeout(1500);
   const cameraStatus = await status.textContent();
   await panel.locator("#sb-stop-camera").click();
@@ -77,19 +82,30 @@ try {
   });
   await page.screenshot({ path: signArtifactPath, fullPage: true });
 
-  const question = "Please explain a project you worked on.";
-  await panel.locator("#sb-question").fill(question);
+  await panel.locator("#sb-question").fill("");
   await page.evaluate(() => {
+    const openChat = document.createElement("button");
+    openChat.setAttribute("aria-label", "Open in-call messages");
+    openChat.style.cssText = "position:fixed;left:10px;top:10px;width:180px;height:40px";
+    const panel = document.createElement("div");
+    panel.hidden = true;
+    panel.setAttribute("role", "region");
+    panel.setAttribute("aria-label", "In-call messages");
     const chat = document.createElement("div");
     chat.contentEditable = "true";
     chat.setAttribute("role", "textbox");
     chat.setAttribute("aria-label", "Send a message");
-    chat.style.cssText = "position:fixed;left:10px;top:10px;width:200px;height:40px";
+    chat.style.cssText = "position:fixed;left:10px;top:60px;width:200px;height:40px";
     const send = document.createElement("button");
     send.setAttribute("aria-label", "Send message");
-    send.style.cssText = "position:fixed;left:220px;top:10px;width:80px;height:40px";
-    send.addEventListener("click", () => { document.body.dataset.signbridgeChatSent = chat.textContent || "sent"; });
-    document.body.append(chat, send);
+    send.style.cssText = "position:fixed;left:220px;top:60px;width:80px;height:40px";
+    send.addEventListener("click", () => {
+      document.body.dataset.signbridgeChatSent = chat.textContent || "sent";
+      chat.textContent = "";
+    });
+    openChat.addEventListener("click", () => { panel.hidden = false; });
+    panel.append(chat, send);
+    document.body.append(openChat, panel);
   });
 
   await panel.locator("details").filter({ hasText: "Recognition and manual correction" }).locator("summary").click();
@@ -100,13 +116,28 @@ try {
     await addGloss.click();
   }
   const answer = panel.locator("#sb-answer");
-  await page.waitForFunction(() => {
-    const host = document.querySelector("#signbridge-root");
-    return Boolean(host?.shadowRoot?.querySelector("#sb-answer")?.value);
-  }, null, { timeout: 15000 });
-  await page.waitForFunction(() => Boolean(document.body.dataset.signbridgeChatSent), null, { timeout: 5000 });
+  try {
+    await page.waitForFunction(() => {
+      const host = document.querySelector("#signbridge-root");
+      return Boolean(host?.shadowRoot?.querySelector("#sb-answer")?.value);
+    }, null, { timeout: 30000 });
+  } catch (error) {
+    console.error("Answer status:", await status.textContent());
+    throw error;
+  }
+  try {
+    await page.waitForFunction(() => Boolean(document.body.dataset.signbridgeChatSent), null, { timeout: 5000 });
+  } catch (error) {
+    console.error("Chat status:", await status.textContent());
+    console.error("Chat DOM:", await page.evaluate(() => ({
+      opened: !document.querySelector('[aria-label="In-call messages"]')?.hidden,
+      draft: document.querySelector('[aria-label="Send a message"]')?.textContent
+    })));
+    throw error;
+  }
 
   const answerText = await answer.inputValue();
+  if (await panel.locator("#sb-question").inputValue()) throw new Error("Sentence generation test must have no interviewer question");
   const finalStatus = await status.textContent();
   const workerUrl = context.serviceWorkers()[0]?.url() || "";
   const extensionOrigin = workerUrl.match(/^chrome-extension:\/\/[^/]+/)?.[0] || "unknown";
