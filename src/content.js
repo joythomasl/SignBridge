@@ -1,11 +1,8 @@
 import { VisionController } from "./vision.js";
 import { SignBridgeHud } from "./hud.js";
 import { MeetAdapter } from "./meet-adapter.js";
-import { PoseStabilityGate, StableGestureDetector, TemporalGestureDetector, averageVectors, classifyLandmarkVector, findBestMatch, resampleSequence, sequenceMotionEnergy } from "./recognizer.js";
-import { checkGemma, generateAnswer, mapQuestionToSign, refineMeetCaption } from "./gemma.js";
-import { getSequenceTemplates, getSettings, getTemplates, saveSequenceTemplate, saveSettings, saveTemplate } from "./storage.js";
-import { deleteClip, getClip, listClips, saveClip } from "./clip-store.js";
-import { DEMO_GLOSSES, INTENTS } from "./constants.js";
+import { checkGemma, generateAnswer, refineMeetCaption } from "./gemma.js";
+import { getSettings, saveSettings } from "./storage.js";
 
 if (!document.getElementById("signbridge-root")) {
   boot().catch((error) => console.error("SignBridge failed to start", error));
@@ -13,178 +10,95 @@ if (!document.getElementById("signbridge-root")) {
 
 async function boot() {
   let settings = await getSettings();
-  const alphabetModel = await loadAlphabetModel();
-  const builtInWordTemplates = await loadBuiltInWordTemplates();
-  let wordTemplates = { ...builtInWordTemplates, ...(await getSequenceTemplates()) };
-  let templates = await getTemplates();
-  const signLibrary = await loadBundledSignLibrary();
-  const signClipsById = new Map(signLibrary.clips.map((clip) => [clip.id, clip]));
-  const alphabetPoseByLabel = createAlphabetPoseMap(alphabetModel);
-  const candidateVocabulary = [...new Set([
-    ...DEMO_GLOSSES,
-    ...signLibrary.clips.map((clip) => clip.label.toUpperCase()),
-    ...(alphabetModel.classes || [])
+  const labelData = await fetch(chrome.runtime.getURL("assets/asl/labels.json")).then((response) => response.json());
+  const vocabulary = [...new Set([
+    ...labelData.signs.filter((item) => item.shipped).map((item) => item.label.toUpperCase()),
+    ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   ])].sort();
   let glossBuffer = [];
   let latestCaption = "";
-  let calibration = null;
-  let mediaRecorder = null;
-  let recordingChunks = [];
-  let recordingIntent = null;
-  let signClipUrl = null;
+  let handsPresent = false;
   let liveTimer = null;
   let liveGenerating = false;
-  let autoQuestionTimer = null;
-  let reverseGenerating = false;
-  let queuedQuestion = "";
-  let lastTranslatedQuestion = "";
+  let captionRevision = 0;
   let lastSpokenText = "";
   let lastSpokenAt = 0;
-  let handsPresent = false;
-  let captionRevision = 0;
 
   const hud = new SignBridgeHud({
-    startCamera,
-    stopCamera,
-    calibrate,
-    addGloss,
-    clearGlosses,
-    questionChanged: scheduleAutoQuestion,
-    speak,
-    copy,
-    insertChat,
-    saveSettings: handleSaveSettings,
-    checkGemma: handleCheckGemma,
-    replaySign: () => hud.replaySign(),
-    slowerSign: () => hud.slowerSign(),
-    recordClip,
-    stopRecording,
-    deleteClip: handleDeleteClip
-  }, candidateVocabulary);
+    startCamera, stopCamera, addGloss, clearGlosses, speak, copy, insertChat,
+    saveSettings: handleSaveSettings, checkGemma: handleCheckGemma,
+    questionChanged: (question) => {
+      if (question) hud.showLatestCaption(question);
+    }
+  }, vocabulary);
   hud.setSettings(settings);
   hud.renderGlosses(glossBuffer, removeGloss);
 
-  const detector = new StableGestureDetector({
-    threshold: settings.detectionThreshold,
-    holdMs: Math.max(settings.detectionHoldMs, 750),
-    cooldownMs: Math.max(settings.detectionCooldownMs, 1100),
-    onCandidate: (match) => {
-      hud.setDetected(match);
-    },
-    onAccept: ({ gloss }) => {
-      if (!gloss) return;
-      glossBuffer.push(gloss);
-      hud.renderGlosses(glossBuffer, removeGloss);
-      hud.setStatus(`Sign accepted: ${gloss}`, "success");
-      hud.setLiveState("Sign accepted — continue signing, then lower your hands to speak", true);
-    }
-  });
-
-  const wordDetector = new TemporalGestureDetector({
-    templates: wordTemplates,
-    threshold: 0.88,
-    minMargin: 0.015,
-    holdMs: 650,
-    cooldownMs: 1800,
-    onCandidate: (match) => {
-      if (match?.gloss && match.score >= 0.88 && match.margin >= 0.015) hud.setDetected({ ...match, handPresent: true });
-    },
-    onAccept: ({ gloss }) => {
-      if (!gloss) return;
-      detector.reset();
-      glossBuffer.push(gloss);
-      hud.renderGlosses(glossBuffer, removeGloss);
-      hud.setStatus(`Word accepted: ${gloss}`, "success");
-      hud.setLiveState("Word accepted — continue signing, then lower your hands to speak", true);
-    }
-  });
-
-  const poseStabilityGate = new PoseStabilityGate();
+  function accept(match, kind) {
+    if (!match?.gloss) return;
+    glossBuffer.push(match.gloss);
+    hud.renderGlosses(glossBuffer, removeGloss);
+    hud.setDetected(match);
+    hud.setStatus(`ASL ${kind} accepted: ${match.gloss} (${Math.round(match.score * 100)}%)`, "success");
+    if (!handsPresent) scheduleLiveGeneration();
+  }
 
   const vision = new VisionController({
-    video: hud.video,
-    canvas: hud.canvas,
-    fps: settings.inferenceFps,
+    video: hud.video, canvas: hud.canvas, fps: settings.inferenceFps,
     onVector(vector) {
-      if (!vector) {
+      if (vector) {
+        handsPresent = true;
+        cancelLiveTimer();
+        if (glossBuffer.length) hud.setLiveState("Signing continues — audio waits until hands are lowered", true);
+        else hud.setDetected({ handPresent: true });
+      } else {
         if (handsPresent) {
           handsPresent = false;
           scheduleLiveGeneration();
         }
-        poseStabilityGate.reset();
         hud.setDetected(null);
-        detector.update({ gloss: null, score: 0 });
-        wordDetector.update(null);
-        return;
       }
-      handsPresent = true;
-      cancelLiveTimer();
-      if (glossBuffer.length) hud.setLiveState("Signing continues — audio waits until hands are lowered", true);
-      if (calibration) {
-        calibration.samples.push(vector);
-        const progress = Math.min((performance.now() - calibration.startedAt) / calibration.durationMs, 1);
-        hud.setCalibrationState(`Hold ${calibration.gloss} steady…`, progress);
-        return;
-      }
-      if (mediaRecorder?.state === "recording") return;
-      const stableVector = poseStabilityGate.update(vector);
-      if (!stableVector) {
-        detector.update({ gloss: null, score: 0, handPresent: true, unstable: true });
-        wordDetector.update(vector);
-        return;
-      }
-      const calibratedMatch = findBestMatch(stableVector, templates);
-      const trainedMatch = classifyLandmarkVector(stableVector, alphabetModel);
-      const match = calibratedMatch.gloss && calibratedMatch.score >= settings.detectionThreshold
-        ? calibratedMatch
-        : trainedMatch;
-      match.handPresent = true;
-      detector.update(match);
-      wordDetector.update(vector);
     },
-    onError(error) {
-      hud.setStatus(`Vision error: ${error.message}`, "error");
-    }
+    onWord: (match) => accept(match, "word"),
+    onLetter: (match) => accept(match, "letter"),
+    onUncertain(match) {
+      hud.setStatus(match?.reason === "partial"
+        ? "Keep your shoulders and hands in frame, then repeat the word."
+        : `ASL sign unclear${match?.gloss ? ` (closest: ${match.gloss})` : ""}. Repeat the complete word.`, "warn");
+    },
+    onError(error) { hud.setStatus(`Vision error: ${error.message}`, "error"); }
   });
 
   const meet = new MeetAdapter({
     async onCaption(caption) {
+      if (isRecentSpokenCaption(caption)) return;
       const revision = ++captionRevision;
       latestCaption = caption;
       hud.showLatestCaption(caption);
-      if (!looksLikeQuestion(caption) || isRecentSpokenCaption(caption)) return;
-      hud.setQuestion(caption, "caption");
-      scheduleAutoQuestion(caption);
-      let finalized = caption;
+      if (looksLikeQuestion(caption)) hud.setQuestion(caption, "caption");
       try {
         const refined = await refineMeetCaption(settings, caption);
         if (revision !== captionRevision) return;
-        const candidate = String(refined.result?.caption || "").trim();
-        if (candidate && candidate.length <= 320 && refined.result?.is_question !== false) finalized = candidate;
+        const cleaned = String(refined.result?.caption || "").trim();
+        if (!cleaned || cleaned.length > 320) return;
+        latestCaption = cleaned;
+        hud.showLatestCaption(cleaned);
+        if (refined.result?.is_question) hud.setQuestion(cleaned, "caption");
       } catch {
-        // Keep the raw Meet caption when local Gemma is unavailable or busy.
+        // Keep Meet's caption if the local language model is unavailable.
       }
-      if (revision !== captionRevision) return;
-      latestCaption = finalized;
-      hud.showLatestCaption(finalized);
-      hud.setQuestion(finalized, "caption");
-      if (finalized !== caption) scheduleAutoQuestion(finalized);
     }
   });
   meet.start();
-
-  await updateClipInventory();
   hud.setLiveState("Always-live mode ready — start the camera to begin", true);
-  hud.setStatus("Always-live mode ready. Meet questions and signed responses are processed automatically.", "success");
+  hud.setStatus("ASL words and Meet captions are ready. Start the camera.", "success");
 
   async function startCamera() {
     try {
-      hud.setStatus("Starting camera and MediaPipe…", "info");
+      hud.setStatus("Loading local ASL models and camera…", "info");
       await vision.start();
       hud.setCameraRunning(true);
-      const calibratedCount = Object.keys(templates).length;
-      const personalWordCount = Object.values(wordTemplates).filter((template) => template.source === "personal-motion-training").length;
-      hud.setStatus(`Camera ready. ${Object.keys(builtInWordTemplates).length} words · ${alphabetModel.classes?.length || 0} trained letters/digits loaded${personalWordCount > 0 ? ` · ${personalWordCount} personal word motions` : ""}${calibratedCount > 0 ? ` · ${calibratedCount} custom poses` : ""}.`, "success");
+      hud.setStatus(`Camera ready. ${vision.modelInfo.words} ASL words and ${vision.modelInfo.letters} static letters loaded. Words have priority.`, "success");
     } catch (error) {
       hud.setCameraRunning(false);
       hud.setStatus(`Camera unavailable: ${error.message}`, "error");
@@ -194,55 +108,10 @@ async function boot() {
   function stopCamera() {
     cancelLiveTimer();
     handsPresent = false;
-    if (mediaRecorder?.state === "recording") mediaRecorder.stop();
     vision.stop();
-    detector.reset();
-    wordDetector.reset();
-    poseStabilityGate.reset();
     hud.setCameraRunning(false);
     hud.setDetected(null);
     hud.setStatus("Camera stopped.", "info");
-  }
-
-  async function calibrate() {
-    if (!vision.getStream()) {
-      await startCamera();
-      if (!vision.getStream()) return;
-    }
-    if (calibration) return;
-    const gloss = hud.getCalibrationGloss();
-    const staticPose = /^[A-Z1-9]$/.test(gloss);
-    hud.setCalibrationState(staticPose ? `Get ready to hold ${gloss}…` : `Get ready to perform ${gloss} once…`);
-    await delay(650);
-    calibration = {
-      gloss,
-      samples: [],
-      startedAt: performance.now(),
-      durationMs: staticPose ? 1700 : 3000
-    };
-    await delay(calibration.durationMs);
-    const completed = calibration;
-    calibration = null;
-    const minimumSamples = staticPose ? 8 : 18;
-    if (completed.samples.length < minimumSamples) {
-      hud.setCalibrationState(`Training failed: only ${completed.samples.length}/${minimumSamples} usable frames. Keep both hands visible and try again.`);
-      return;
-    }
-    if (staticPose) {
-      const vector = averageVectors(completed.samples);
-      templates = await saveTemplate(gloss, vector);
-    } else {
-      const sequence = resampleSequence(completed.samples, 12);
-      wordTemplates = { ...builtInWordTemplates, ...(await saveSequenceTemplate(gloss, sequence, sequenceMotionEnergy(sequence))) };
-      wordDetector.templates = wordTemplates;
-    }
-    detector.reset();
-    wordDetector.reset();
-    poseStabilityGate.reset();
-    hud.setCalibrationState(staticPose
-      ? `${gloss} pose trained from ${completed.samples.length} frames.`
-      : `${gloss} motion trained from ${completed.samples.length} frames.`);
-    hud.setStatus(`${gloss} personal ${staticPose ? "pose" : "motion"} saved locally.`, "success");
   }
 
   function removeGloss(index) {
@@ -253,6 +122,7 @@ async function boot() {
 
   function addGloss() {
     const gloss = hud.getCalibrationGloss();
+    if (!gloss) return;
     glossBuffer.push(gloss);
     hud.renderGlosses(glossBuffer, removeGloss);
     hud.setStatus(`Added ${gloss} manually.`, "success");
@@ -262,69 +132,12 @@ async function boot() {
   function clearGlosses() {
     cancelLiveTimer();
     glossBuffer = [];
-    detector.reset();
-    wordDetector.reset();
-    poseStabilityGate.reset();
     hud.renderGlosses(glossBuffer, removeGloss);
-    hud.setStatus("Gloss buffer cleared.", "info");
-  }
-
-  async function handleGenerateAnswer() {
-    const question = hud.getQuestion();
-    if (!question) {
-      hud.setStatus("Add the interviewer’s question first.", "warn");
-      return;
-    }
-    if (!glossBuffer.length) {
-      hud.setStatus("Sign or add at least one calibrated gloss first.", "warn");
-      return;
-    }
-    await generateFromGlosses(question, [...glossBuffer], false);
-  }
-
-  async function generateFromGlosses(question, glosses, live) {
-    hud.setStatus(live ? "Live mode: translating the signed phrase…" : "Gemma 4 is rendering the signed meaning…", "info");
-    try {
-      const response = await generateAnswer(settings, question, collapseFingerspelling(glosses));
-      const result = response.result || {};
-      const answer = String(result.answer || "").trim();
-      if (!answer) throw new Error("Gemma returned an empty answer");
-      hud.setAnswer(answer, Boolean(result.needs_clarification));
-      hud.setMetrics(response.metrics);
-      if (live && !result.needs_clarification) {
-        speakText(answer);
-        let deliveredToMeet = false;
-        try {
-          await meet.sendChatMessage(`🤟 Candidate via SignBridge: ${answer}`);
-          deliveredToMeet = true;
-        } catch {
-          // Meet chat must be open; local speech still proceeds.
-        }
-        removeProcessedGlosses(glosses);
-        hud.setLiveState("Spoken — listening for the next phrase", true);
-        hud.setStatus(deliveredToMeet
-          ? "Live response spoken locally and transmitted in Meet chat. Listening continues."
-          : "Live response spoken locally. Open Meet chat for guaranteed remote text delivery.", deliveredToMeet ? "success" : "warn");
-      } else if (live) {
-        hud.setLiveState("Clarification needed — nothing was spoken", true);
-      } else if (!result.needs_clarification) {
-        hud.setStatus("Answer ready. Review and approve it before delivery.", "success");
-      }
-    } catch (error) {
-      const literal = `My response is: ${glosses.join(" ").toLowerCase()}.`;
-      hud.setAnswer(literal, true);
-      hud.setMetrics(null);
-      if (live) {
-        hud.setLiveState("Live translation failed — nothing was spoken", true);
-        hud.setStatus(`Live Gemma unavailable (${error.message}). Nothing was spoken automatically.`, "warn");
-      } else {
-        hud.setStatus(`Gemma unavailable (${error.message}). Showing a literal fallback.`, "warn");
-      }
-    }
+    hud.setStatus("Current phrase cleared.", "info");
   }
 
   function scheduleLiveGeneration() {
-    if (!glossBuffer.length || handsPresent) return;
+    if (!glossBuffer.length || handsPresent || liveGenerating) return;
     cancelLiveTimer();
     hud.setLiveState("Hands lowered — translating the completed phrase", true);
     liveTimer = setTimeout(flushLivePhrase, Math.max(settings.livePauseMs || 0, 2000));
@@ -332,163 +145,52 @@ async function boot() {
 
   async function flushLivePhrase() {
     liveTimer = null;
-    if (!glossBuffer.length) return;
-    if (handsPresent) return;
-    if (liveGenerating) {
-      scheduleLiveGeneration();
-      return;
-    }
-    const question = hud.getQuestion();
+    if (!glossBuffer.length || handsPresent || liveGenerating) return;
+    const question = hud.getQuestion() || latestCaption;
     if (!question) {
-      hud.setLiveState("Add or capture the interviewer question first", true);
-      hud.setStatus("Live audio needs the interviewer’s question for context.", "warn");
+      hud.setLiveState("Waiting for the interviewer question", true);
       return;
     }
     const phrase = [...glossBuffer];
     liveGenerating = true;
+    let completed = false;
+    hud.setLiveState("Gemma 4 is rendering the signed meaning…", true);
     try {
-      await generateFromGlosses(question, phrase, true);
+      const response = await generateAnswer(settings, question, collapseFingerspelling(phrase));
+      const answer = String(response.result?.answer || "").trim();
+      if (!answer) throw new Error("Gemma returned an empty answer");
+      hud.setAnswer(answer, Boolean(response.result.needs_clarification));
+      hud.setMetrics(response.metrics);
+      if (response.result.needs_clarification) {
+        hud.setStatus("Meaning is unclear. Review the answer before speaking.", "warn");
+        return;
+      }
+      speakText(answer);
+      let delivered = false;
+      try {
+        await meet.sendChatMessage(`🤟 Candidate via SignBridge: ${answer}`);
+        delivered = true;
+      } catch {
+        // Chat delivery depends on Meet's visible chat controls.
+      }
+      if (phrase.every((gloss, index) => glossBuffer[index] === gloss)) glossBuffer.splice(0, phrase.length);
+      completed = true;
+      hud.renderGlosses(glossBuffer, removeGloss);
+      hud.setLiveState("Spoken — listening for the next phrase", true);
+      hud.setStatus(delivered
+        ? "Spoken locally and sent in Meet chat."
+        : "Spoken locally. Meet chat delivery is unavailable.", delivered ? "success" : "warn");
+    } catch (error) {
+      hud.setStatus(`Gemma 4 unavailable: ${error.message}. Nothing was spoken.`, "warn");
     } finally {
       liveGenerating = false;
-      if (glossBuffer.length) scheduleLiveGeneration();
+      if (completed && glossBuffer.length && !handsPresent) scheduleLiveGeneration();
     }
-  }
-
-  function removeProcessedGlosses(processed) {
-    const samePrefix = processed.every((gloss, index) => glossBuffer[index] === gloss);
-    if (samePrefix) glossBuffer.splice(0, processed.length);
-    hud.renderGlosses(glossBuffer, removeGloss);
   }
 
   function cancelLiveTimer() {
     if (liveTimer) clearTimeout(liveTimer);
     liveTimer = null;
-  }
-
-  function scheduleAutoQuestion(question) {
-    const normalized = String(question || "").trim();
-    if (!normalized || normalized === lastTranslatedQuestion) return;
-    clearTimeout(autoQuestionTimer);
-    hud.setStatus("Interviewer question detected — preparing ISL…", "info");
-    autoQuestionTimer = setTimeout(() => translateToSign(normalized), 450);
-  }
-
-  async function translateToSign(questionOverride = "") {
-    const question = questionOverride || hud.getQuestion();
-    if (!question) {
-      return;
-    }
-    if (reverseGenerating) {
-      queuedQuestion = question;
-      return;
-    }
-    const localExact = signLibrary.clips.find((clip) => normalizePhrase(clip.label) === normalizePhrase(question));
-    if (localExact) {
-      hud.showSignResult({
-        question,
-        glosses: [localExact.label.toUpperCase()],
-        clipUrl: null,
-        vectorSequences: createWordVectorSequences([localExact], wordTemplates),
-        exact: true,
-        quality: "Generated avatar · dataset motion"
-      });
-      lastTranslatedQuestion = question;
-      hud.setStatus("Interviewer question detected and exact dataset animation started.", "warn");
-      return;
-    }
-    const spellingSequence = createFingerspellingSequence(question);
-    if (spellingSequence.vectors.length) {
-      hud.showSignResult({
-        question,
-        glosses: ["LIVE FINGERSPELLING"],
-        clipUrl: null,
-        vectorSequences: [spellingSequence],
-        exact: false,
-        quality: "Live fingerspelling · approximate"
-      });
-      hud.setStatus("Question detected — fingerspelling started while Gemma selects the best ISL clips.", "info");
-    }
-    reverseGenerating = true;
-    hud.setStatus("Gemma 4 is mapping the question to verified ISL…", "info");
-    try {
-      const availableClips = signLibrary.clips.map(({ id, label, kind }) => ({ id, label, kind }));
-      const response = await mapQuestionToSign(settings, question, INTENTS, availableClips);
-      const result = response.result || {};
-      const validIntent = INTENTS.some((item) => item.id === result.intent) ? result.intent : "UNSUPPORTED";
-      const mappedExactBuiltIn = result.exact_clip !== "NONE" ? signClipsById.get(result.exact_clip) : null;
-      const selectedIds = mappedExactBuiltIn
-        ? [mappedExactBuiltIn.id]
-        : Array.isArray(result.clips) ? result.clips.filter((id) => signClipsById.has(id)).slice(0, 8) : [];
-      const selectedClips = selectedIds.map((id) => signClipsById.get(id));
-      const glosses = selectedClips.map((item) => item.label.toUpperCase());
-      const clip = validIntent === "UNSUPPORTED" ? null : await getClip(validIntent);
-      if (signClipUrl) URL.revokeObjectURL(signClipUrl);
-      signClipUrl = clip?.blob ? URL.createObjectURL(clip.blob) : null;
-      const datasetSequences = createWordVectorSequences(selectedClips, wordTemplates);
-      const usingFingerspelling = !signClipUrl && !datasetSequences.length && spellingSequence.vectors.length;
-      const vectorSequences = signClipUrl ? [] : datasetSequences.length ? datasetSequences : usingFingerspelling ? [spellingSequence] : [];
-      const quality = signClipUrl
-        ? "Verified signer recording"
-        : mappedExactBuiltIn
-          ? "Generated avatar · dataset motion"
-          : datasetSequences.length
-            ? "Generated avatar sequence · approximate"
-            : usingFingerspelling
-              ? "Live fingerspelling · approximate"
-            : "Unsupported";
-      hud.showSignResult({
-        question,
-        glosses,
-        clipUrl: signClipUrl,
-        vectorSequences,
-        exact: Boolean(signClipUrl || mappedExactBuiltIn),
-        quality,
-        message: validIntent === "UNSUPPORTED"
-          ? "This question is outside the supported interview intents. Read the caption; only available dataset concepts are shown."
-          : `No custom recording or useful dataset sequence is available for ${validIntent}.`
-      });
-      hud.setMetrics(response.metrics);
-      if (signClipUrl) hud.setStatus("Verified ISL signer recording is playing.", "success");
-      else if (mappedExactBuiltIn) hud.setStatus("Exact dataset phrase is playing. Review its ISL accuracy before the demo.", "warn");
-      else if (datasetSequences.length) hud.setStatus("Approximate dataset sequence is playing with the original caption retained.", "warn");
-      else if (usingFingerspelling) hud.setStatus("No phrase match; the question is being fingerspelled with its caption retained.", "warn");
-      else hud.setStatus("No matching dataset clip is available. Caption retained; no false signing shown.", "warn");
-      lastTranslatedQuestion = question;
-    } catch (error) {
-      hud.showSignResult({
-        question,
-        glosses: spellingSequence.vectors.length ? ["LIVE FINGERSPELLING"] : [],
-        clipUrl: null,
-        vectorSequences: spellingSequence.vectors.length ? [spellingSequence] : [],
-        exact: false,
-        quality: spellingSequence.vectors.length ? "Generated fingerspelling avatar · approximate" : "Unsupported",
-        message: `Could not map this question: ${error.message}`
-      });
-      hud.setStatus(spellingSequence.vectors.length ? "Gemma mapping failed; live fingerspelling continues." : `Question-to-ISL failed: ${error.message}`, "warn");
-    } finally {
-      reverseGenerating = false;
-      if (queuedQuestion && queuedQuestion !== question) {
-        const nextQuestion = queuedQuestion;
-        queuedQuestion = "";
-        scheduleAutoQuestion(nextQuestion);
-      }
-    }
-  }
-
-  function useLatestCaption() {
-    if (!latestCaption) {
-      hud.setStatus("No Meet caption detected. Turn captions on or type the question.", "warn");
-      return;
-    }
-    hud.setQuestion(latestCaption, "caption");
-    hud.setStatus("Latest Meet caption selected.", "success");
-  }
-
-  function speak() {
-    const answer = hud.getAnswer();
-    if (!answer) return;
-    speakText(answer);
-    hud.setStatus("Speaking approved answer locally.", "success");
   }
 
   function speakText(text) {
@@ -503,26 +205,19 @@ async function boot() {
 
   function isRecentSpokenCaption(caption) {
     if (!lastSpokenText || Date.now() - lastSpokenAt > 15000) return false;
-    const captionText = normalizePhrase(caption);
-    const spokenText = normalizePhrase(lastSpokenText);
-    return captionText.length > 10 && (captionText.includes(spokenText) || spokenText.includes(captionText));
+    const observed = normalizePhrase(caption);
+    const spoken = normalizePhrase(lastSpokenText);
+    return observed.length > 10 && (observed.includes(spoken) || spoken.includes(observed));
   }
 
-  function createFingerspellingSequence(text) {
-    const vectors = [];
-    for (const character of String(text || "").toUpperCase().slice(0, 80)) {
-      const vector = alphabetPoseByLabel.get(character);
-      if (vector) vectors.push(vector);
-      else if (/\s/.test(character) && vectors.length) vectors.push(null, null);
-    }
-    return { fps: 3, vectors };
+  function speak() {
+    const answer = hud.getAnswer();
+    if (answer) speakText(answer);
   }
 
   async function copy() {
     const answer = hud.getAnswer();
-    if (!answer) return;
-    await navigator.clipboard.writeText(answer);
-    hud.setStatus("Approved answer copied.", "success");
+    if (answer) await navigator.clipboard.writeText(answer);
   }
 
   function insertChat() {
@@ -530,10 +225,9 @@ async function boot() {
     if (!answer) return;
     try {
       meet.insertChatDraft(`🤟 Candidate via SignBridge: ${answer}`);
-      hud.setStatus("Draft inserted. Review it in Meet and press Send yourself.", "success");
+      hud.setStatus("Draft inserted in Meet chat.", "success");
     } catch (error) {
-      navigator.clipboard.writeText(answer).catch(() => {});
-      hud.setStatus(`${error.message} The answer was copied instead.`, "warn");
+      hud.setStatus(error.message, "warn");
     }
   }
 
@@ -545,76 +239,18 @@ async function boot() {
     }
     settings = await saveSettings({ ...settings, ...form });
     hud.setSettings(settings);
-    hud.setStatus("Gemma settings saved locally.", "success");
+    hud.setStatus("Gemma 4 settings saved.", "success");
   }
 
   async function handleCheckGemma() {
     await handleSaveSettings();
-    hud.setStatus("Checking Gemma 4 endpoint…", "info");
     try {
       const health = await checkGemma(settings);
-      if (health.installed) hud.setStatus(`Gemma 4 ready: ${settings.model}`, "success");
-      else hud.setStatus(`Endpoint is online, but ${settings.model} is not installed.`, "warn");
+      hud.setStatus(health.installed ? `Gemma 4 ready: ${settings.model}` : `Model ${settings.model} is not installed.`, health.installed ? "success" : "warn");
     } catch (error) {
       hud.setStatus(`Gemma endpoint unavailable: ${error.message}`, "error");
     }
   }
-
-  async function recordClip() {
-    if (!vision.getStream()) {
-      await startCamera();
-      if (!vision.getStream()) return;
-    }
-    if (mediaRecorder?.state === "recording") return;
-    recordingIntent = hud.getClipIntent();
-    recordingChunks = [];
-    const mimeCandidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
-    const mimeType = mimeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
-    mediaRecorder = new MediaRecorder(vision.getStream(), mimeType ? { mimeType } : undefined);
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data?.size) recordingChunks.push(event.data);
-    };
-    mediaRecorder.onerror = (event) => {
-      hud.setRecording(false, `Recording error: ${event.error?.message || "unknown error"}`);
-    };
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(recordingChunks, { type: mediaRecorder.mimeType || "video/webm" });
-      if (blob.size < 1000) {
-        hud.setRecording(false, "Recording was empty. Try again.");
-        return;
-      }
-      await saveClip(recordingIntent, blob);
-      hud.setRecording(false, `${recordingIntent} saved locally (${(blob.size / 1024).toFixed(0)} KB).`);
-      hud.setStatus("Verified ISL phrase clip saved. Review it before the demo.", "success");
-      await updateClipInventory();
-    };
-    mediaRecorder.start(250);
-    hud.setRecording(true, `Recording ${recordingIntent}… perform the complete verified ISL phrase.`);
-    hud.setStatus("Recording ISL phrase. Press Stop & save when complete.", "warn");
-  }
-
-  function stopRecording() {
-    if (mediaRecorder?.state === "recording") mediaRecorder.stop();
-  }
-
-  async function handleDeleteClip() {
-    const intent = hud.getClipIntent();
-    await deleteClip(intent);
-    hud.setRecording(false, `${intent} recording deleted.`);
-    hud.setStatus("ISL phrase clip deleted.", "info");
-    await updateClipInventory();
-  }
-
-  async function updateClipInventory() {
-    const clips = await listClips();
-    const recorded = new Set(clips.map((clip) => clip.intent));
-    const count = INTENTS.filter((intent) => recorded.has(intent.id)).length;
-    hud.setRecording(false, `${signLibrary.clips.length} bundled dataset clips · ${count}/${INTENTS.length} verified custom phrases.`);
-  }
-}
-
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function normalizePhrase(value) {
@@ -622,82 +258,20 @@ function normalizePhrase(value) {
 }
 
 function looksLikeQuestion(value) {
-  const text = normalizePhrase(value);
-  return /\b(what|why|how|when|where|who|which|can|could|would|will|do|does|did|have|has|tell|describe|explain|please|walk)\b/.test(text);
+  return /\b(what|why|how|when|where|who|which|can|could|would|will|do|does|did|have|has|tell|describe|explain|please|walk)\b/.test(normalizePhrase(value));
 }
 
 function collapseFingerspelling(glosses) {
-  const collapsed = [];
+  const result = [];
   let letters = "";
   const flush = () => {
-    if (letters) collapsed.push(`FINGERSPELL:${letters}`);
+    if (letters) result.push(`FINGERSPELL:${letters}`);
     letters = "";
   };
   for (const gloss of glosses) {
-    if (/^[A-Z1-9]$/.test(gloss)) letters += gloss;
-    else {
-      flush();
-      collapsed.push(gloss);
-    }
+    if (/^[A-Z]$/.test(gloss)) letters += gloss;
+    else { flush(); result.push(gloss); }
   }
   flush();
-  return collapsed;
-}
-
-function createAlphabetPoseMap(model) {
-  const poses = new Map();
-  if (!Array.isArray(model?.classes) || !Array.isArray(model?.centroids)) return poses;
-  model.classes.forEach((label, classIndex) => {
-    const centroid = model.centroids[classIndex];
-    if (!Array.isArray(centroid) || centroid.length !== model.featureCount) return;
-    const vector = centroid.map((value, featureIndex) => (
-      value * (model.scale?.[featureIndex] || 1) + (model.mean?.[featureIndex] || 0)
-    ));
-    poses.set(label, vector);
-  });
-  return poses;
-}
-
-function createWordVectorSequences(clips, templates) {
-  return clips.flatMap((clip) => {
-    const template = templates[clip.label.toUpperCase()];
-    if (!Array.isArray(template?.sequence) || !template.sequence.length) return [];
-    return [{ fps: 10, vectors: template.sequence }];
-  });
-}
-
-async function loadBundledSignLibrary() {
-  try {
-    const response = await fetch(chrome.runtime.getURL("assets/signs/library.json"));
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const manifest = await response.json();
-    return { ...manifest, clips: Array.isArray(manifest.clips) ? manifest.clips : [] };
-  } catch (error) {
-    console.warn("SignBridge bundled sign library unavailable", error);
-    return { version: 1, clips: [] };
-  }
-}
-
-async function loadAlphabetModel() {
-  try {
-    const response = await fetch(chrome.runtime.getURL("assets/signs/alphabet-model.json"));
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const model = await response.json();
-    return model.classes && Array.isArray(model.classes) ? model : { classes: [] };
-  } catch (error) {
-    console.warn("SignBridge trained alphabet model unavailable", error);
-    return { classes: [] };
-  }
-}
-
-async function loadBuiltInWordTemplates() {
-  try {
-    const response = await fetch(chrome.runtime.getURL("assets/signs/word-templates.json"));
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const manifest = await response.json();
-    return manifest.templates && typeof manifest.templates === "object" ? manifest.templates : {};
-  } catch (error) {
-    console.warn("SignBridge word recognition templates unavailable", error);
-    return {};
-  }
+  return result;
 }

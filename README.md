@@ -1,21 +1,21 @@
 # SignBridge AI
 
-A 24-hour hackathon prototype that adds a candidate-controlled, bidirectional ISL communication panel to Google Meet. MediaPipe performs local hand tracking, while Gemma 4 cleans finalized captions, converts constrained glosses to concise English, and maps interviewer questions to the available ISL vocabulary.
+A Chrome extension prototype for Google Meet that displays interviewer captions and translates a limited set of candidate ASL signs into spoken English with Gemma 4.
 
-## What works
+## Current features
 
-- Recognize 44 bundled temporal word/phrase motions using speed-tolerant dynamic time warping, plus all 35 `A–Z`/`1–9` classes with a nonlinear landmark MLP.
-- Train a personal 3-second motion sample for any word that does not generalize to the current signer.
-- Automatically detect stabilized Meet questions, refine punctuation conservatively with Gemma 4, and show a large bottom-screen caption.
-- Generate a constrained answer with local Gemma 4.
-- Translate and speak completed signed phrases after the signer lowers their hands; keep collecting while either hand remains visible.
-- Keep a review-first mode with mandatory approval before manual speech or Meet chat insertion.
-- Map supported questions to locally recorded, verified ISL phrase clips.
-- Generate a smooth two-hand signing avatar from all 21 landmarks per hand; the runtime package contains no dataset photographs.
-- Immediately animate unsupported questions with 35 generated alphanumeric poses while Gemma searches for a better word sequence.
-- Store gesture templates and phrase clips in local browser storage.
+- Displays detected Meet captions both in the interviewer panel and in a large overlay at the bottom of the screen. Gemma 4 conservatively cleans finalized captions.
+- Tracks both hands, upper-body pose and face landmarks locally with MediaPipe Holistic.
+- Recognizes **250 isolated ASL words** with a local ONNX model from [GestureSign](https://github.com/shashank11yadav/GestureSign). Motion is segmented into complete signs; low-confidence results are rejected instead of guessed.
+- Uses a separate ASL static alphabet model from [SignBridge](https://github.com/mhmdtaha091/SignBridge) for **24 held letters**. A 1.5-second hold is required; letters are suppressed while a word is being recognized. J and Z require motion and are available through manual correction, not automatic recognition.
+- Accumulates accepted words, calls the configured **Gemma 4** model to render a short response, then speaks it through browser text-to-speech after the signer lowers their hands.
+- Sends the same response through Meet chat when the chat control is available. The user can correct glosses and review the generated answer.
 
-## Quick start
+The interviewer animation and the previous ISL runtime models have been removed from the extension package.
+
+## Build and run
+
+Requirements: Chrome, Node.js 20+, Ollama with Gemma 4.
 
 ```powershell
 npm install
@@ -24,42 +24,24 @@ ollama pull gemma4:e2b-it-q4_K_M
 npm run ollama:serve
 ```
 
-Keep that Ollama terminal open. In a second terminal, verify the model and extension:
+Load [dist](dist) via `chrome://extensions` → **Developer mode** → **Load unpacked**. Reload the extension there after each build, and refresh Meet. Turn Meet captions on and start the SignBridge camera.
 
-```powershell
-npm run smoke:ollama
-npm run smoke:browser
-```
+The repository includes the ASL word model and MediaPipe Holistic model needed at runtime. See [setup](docs/SETUP.md) for the demo checklist.
 
-Load the `dist` directory from `chrome://extensions` using **Load unpacked**, then open Google Meet. For transfer to another laptop, extract `signbridge-extension-0.4.0.zip` first and load the extracted folder.
+## Accuracy and vocabulary limits
 
-See [setup](docs/SETUP.md), [measured benchmark](docs/BENCHMARK.md), [demo script](docs/DEMO_SCRIPT.md), and the [24-hour plan](HACKATHON_24H_PLAN.md).
+The word model's published held-out-signer top-1 accuracy is **72.1%** on its 250 isolated signs. This is not a continuous interpreter or a guarantee for a new webcam signer. Some classes have low individual accuracy; the extension requires at least 45% calibrated probability before accepting a word. Use the visible manual correction if a sign is uncertain.
 
-## Expand the sign library
+The static ASL alphabet model supports A–I and K–Y. It classifies 282 of 288 bundled seed examples correctly, but those examples are not an independent evaluation set. J and Z are motion letters and are not inferred by a static hand classifier.
 
-Import another labeled image-sequence ZIP at any time:
+The supplied `MS-ASL.zip` contains class names, split annotations, and video URLs, **not video clips or hand landmarks**. It cannot train an additional word model without obtaining and processing the source clips. The 250-word model includes general vocabulary, but few technical interview terms. Gemma 4 must not invent missing facts from the question.
 
-```powershell
-npm run import:signs -- "C:\path\to\dataset.zip"
-npm run build
-```
+## Meet audio
 
-The importer accepts `label/frame.png` or `label/frame.jpg`, including a ZIP nested inside another ZIP. It compresses the frames and regenerates `assets/signs/library.json`. See [sign dataset guide](docs/SIGN_DATASETS.md).
+Browser `speechSynthesis` plays through the laptop's speakers. Chrome does not expose it as a Meet microphone track, so remote participants are **not guaranteed to hear it**. Meet chat is the extension's automatic remote delivery path. For remote audio, route system playback through a virtual microphone or loopback device and select that device in Meet.
 
-## Live sign-to-audio
+## Sources and licenses
 
-Live mode is always enabled. SignBridge continuously accumulates recognized glosses while hands remain visible. After the signer lowers both hands, Gemma 4 renders the completed phrase, browser TTS speaks it, and SignBridge sends the same text through Meet chat when the chat control is available. The extension then clears only the processed glosses and continues listening. Meet questions automatically start a word-sequence or fingerspelling avatar animation.
-
-Static letters pass through a motion gate before classification, so intermediate hand shapes are ignored while the signer changes poses. A settled pose is then held for confirmation. Temporal words use a stricter sequence, margin, and expected-motion check, and live speech waits two seconds after the last accepted sign.
-
-The camera label distinguishes **No hand** from **Hand tracked · unknown sign**. Built-in temporal recognition covers the 44 supplied everyday words and phrases. A `134 → 128 → 64 → 35` landmark MLP covers all alphabet/digit labels and rejects low-confidence, ambiguous, or out-of-distribution poses. It was trained on 4,120 MediaPipe-detected samples and reached 99.89% on a held-out split from the supplied dataset. Because that split is from the same source dataset, it does not measure signer-independent accuracy. Personal motion training is provided because the word dataset contains approximately one recorded sequence per label.
-
-Chrome does not expose `speechSynthesis` audio as a microphone track. Therefore local TTS cannot be guaranteed to enter a remote Meet participant's audio on every laptop. Meet chat is the reliable automatic remote delivery path; remote audio additionally requires a loopback/virtual microphone selected in Meet.
-
-## Important limitation
-
-This is a limited-vocabulary prototype, not a continuous ISL interpreter. Bundled dataset clips are labelled for review because their linguistic accuracy and redistribution license have not been independently verified. Signer-verified custom recordings take priority.
-
-## Design references
-
-The recognition update follows established open-source patterns without copying their trained models: [MediaPipe keypoint + point-history classification](https://github.com/kinivi/hand-gesture-recognition-mediapipe), [two-hand ISL MLP normalization and commit states](https://github.com/nitibudania/real-time-isl-recognition), and [local Meet caption capture with revision handling](https://github.com/vincelamm/gMeetTranscriptCapture). SignBridge keeps its own ISL dataset, browser-native model format, dynamic-time-warped word matcher, generated avatar, and Gemma 4 language layer.
+- [GestureSign](https://github.com/shashank11yadav/GestureSign): ASL isolated-sign model, feature extraction, segmentation, and local inference design. MIT license included at [assets/asl/GestureSign-LICENSE.txt](assets/asl/GestureSign-LICENSE.txt).
+- [SignBridge ASL model](https://github.com/mhmdtaha091/SignBridge): 24 static letter weights and hand normalization. MIT license included at [assets/asl/ASL-SignBridge-LICENSE.txt](assets/asl/ASL-SignBridge-LICENSE.txt).
+- [MediaPipe](https://github.com/google-ai-edge/mediapipe) Holistic runs locally in the extension.

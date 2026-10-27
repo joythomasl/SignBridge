@@ -69,14 +69,8 @@ try {
     return Boolean(input?.value);
   }, null, { timeout: 15000 });
   const detectedCaption = await panel.locator("#sb-question").inputValue();
-  await panel.locator("#sb-sign-caption").filter({ hasText: detectedCaption }).waitFor({ timeout: 15000 });
-  await panel.locator("#sb-sign-quality").filter({ hasText: "Generated avatar" }).waitFor({ timeout: 15000 });
-  await page.waitForFunction(() => {
-    const avatar = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-sign-avatar");
-    if (!avatar || avatar.hidden) return false;
-    const pixels = avatar.getContext("2d").getImageData(0, 0, avatar.width, avatar.height).data;
-    return pixels.some((value, index) => index % 4 !== 3 && value > 0);
-  }, null, { timeout: 5000 });
+  await panel.locator("#sb-interviewer-caption").filter({ hasText: detectedCaption }).waitFor({ timeout: 15000 });
+  if (await panel.locator("#sb-sign-avatar").count()) throw new Error("Interviewer animation should be removed");
   await page.evaluate(() => {
     const body = document.querySelector("#signbridge-root")?.shadowRoot?.querySelector("#sb-body");
     if (body) body.scrollTop = 0;
@@ -98,10 +92,10 @@ try {
     document.body.append(chat, send);
   });
 
-  await panel.locator("details").filter({ hasText: "Recognition setup and fallback" }).locator("summary").click();
+  await panel.locator("details").filter({ hasText: "Recognition and manual correction" }).locator("summary").click();
   const glossSelect = panel.locator("#sb-calibration-gloss");
   const addGloss = panel.locator("#sb-add-gloss");
-  for (const gloss of ["ME", "PYTHON", "AI", "PROJECT", "THREE", "YEAR"]) {
+  for (const gloss of ["WE / US", "THINK", "MAKE", "STORY"]) {
     await glossSelect.selectOption(gloss);
     await addGloss.click();
   }
@@ -127,8 +121,7 @@ try {
     cameraStatus,
     captionAutoDetected: detectedCaption,
     gemmaStatus: finalStatus,
-    reverseCaption: await panel.locator("#sb-sign-caption").textContent(),
-    reverseQuality: await panel.locator("#sb-sign-quality").textContent(),
+    reverseCaption: await panel.locator("#sb-interviewer-caption").textContent(),
     answer: answerText,
     meetChatDelivery: await page.evaluate(() => document.body.dataset.signbridgeChatSent),
     signScreenshot: signArtifactPath,

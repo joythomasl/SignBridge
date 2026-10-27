@@ -1,5 +1,3 @@
-import { landmarksToVector } from "./recognizer.js";
-
 const CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4],
   [0, 5], [5, 6], [6, 7], [7, 8],
@@ -19,12 +17,15 @@ function colorForPoint(index) {
 }
 
 export class VisionController {
-  constructor({ video, canvas, fps = 15, onVector, onError }) {
+  constructor({ video, canvas, fps = 15, onVector, onWord, onLetter, onUncertain, onError }) {
     this.video = video;
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
     this.fps = fps;
     this.onVector = onVector;
+    this.onWord = onWord;
+    this.onLetter = onLetter;
+    this.onUncertain = onUncertain;
     this.onError = onError;
     this.frame = null;
     this.stream = null;
@@ -86,6 +87,7 @@ export class VisionController {
 
   stop() {
     this.running = false;
+    this.frame?.contentWindow?.postMessage({ type: "SIGNBRIDGE_VISION_RESET" }, "*");
     this.inFlight = false;
     if (this.frameRequest) cancelAnimationFrame(this.frameRequest);
     this.stream?.getTracks().forEach((track) => track.stop());
@@ -124,9 +126,13 @@ export class VisionController {
     if (event.source !== this.frame?.contentWindow) return;
     const message = event.data || {};
     if (message.type === "SIGNBRIDGE_VISION_READY") {
+      this.modelInfo = { words: message.words, letters: message.letters };
       this.resolveInitialize?.();
       return;
     }
+    if (message.type === "SIGNBRIDGE_WORD_RESULT") { this.onWord?.(message); return; }
+    if (message.type === "SIGNBRIDGE_LETTER_RESULT") { this.onLetter?.(message); return; }
+    if (message.type === "SIGNBRIDGE_WORD_UNCERTAIN") { this.onUncertain?.(message); return; }
     if (message.type === "SIGNBRIDGE_VISION_ERROR") {
       this.inFlight = false;
       const error = new Error(message.message || "MediaPipe failed");
@@ -141,7 +147,7 @@ export class VisionController {
       handedness: Array.isArray(message.handedness) ? message.handedness : []
     };
     this.draw(result);
-    if (result.landmarks.length) this.onVector?.(landmarksToVector(result), result);
+    if (result.landmarks.length) this.onVector?.(true, result);
     else this.onVector?.(null, result);
   }
 
