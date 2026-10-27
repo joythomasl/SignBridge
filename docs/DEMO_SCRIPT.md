@@ -1,21 +1,9 @@
 # 90-second demo
 
-## Preflight
+1. Build and reload the extension, open Meet, enable captions, and start the camera. The status should say A–Z enabled.
+2. Ask a question. Show its caption in the panel and bottom overlay.
+3. Fingerspell a short word, changing handshape between letters. Use the manual selector if a letter is wrong. Demonstrate Space and Backspace.
+4. Lower the hand. The text is spoken locally and posted to Meet chat when its composer is available.
+5. Explain the limit clearly: the released first-place TFLite weights decode complete spelling sequences, while the live preview uses 24 static handshapes and J/Z motion checks. The browser adaptation uses fixed 128-frame resampling, and this is not a validated interpreter for every signer.
 
-- Build, reload the extension, and refresh the Meet tab.
-- Turn on Meet captions and open Meet chat.
-- Start the SignBridge camera; confirm **250 ASL words and 24 static letters loaded**.
-- Check that Gemma 4 reports ready.
-
-## Live flow
-
-1. Interviewer asks, “How are you?” The text appears in the interviewer caption panel and at the bottom of Meet.
-2. Candidate signs **HAPPY** or another word from the supported list. The app waits for a complete motion and shows the accepted ASL word.
-3. Candidate lowers both hands. Gemma 4 renders a short sentence from the recognized glosses. Browser TTS speaks it locally and the text is sent through Meet chat.
-4. Show the manual correction control and explain that uncertain signs are rejected. State that J and Z are manual-only until a motion-letter model is available.
-
-## If recognition fails
-
-Repeat the complete sign with both hands and upper body visible. If the model remains uncertain, select the intended word in **Recognition and manual correction**. Keep the caption visible and continue the Gemma 4 response flow.
-
-Browser TTS cannot be guaranteed to enter Meet audio without a virtual microphone or loopback device.
+Remote Meet audio requires a virtual microphone or loopback source; local browser speech synthesis is not itself a Meet microphone stream.

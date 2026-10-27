@@ -17,15 +17,16 @@ function colorForPoint(index) {
 }
 
 export class VisionController {
-  constructor({ video, canvas, fps = 15, onVector, onWord, onLetter, onUncertain, onError }) {
+  constructor({ video, canvas, fps = 15, onVector, onLetter, onPreview, onTranscript, onModelStatus, onError }) {
     this.video = video;
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
     this.fps = fps;
     this.onVector = onVector;
-    this.onWord = onWord;
     this.onLetter = onLetter;
-    this.onUncertain = onUncertain;
+    this.onPreview = onPreview;
+    this.onTranscript = onTranscript;
+    this.onModelStatus = onModelStatus;
     this.onError = onError;
     this.frame = null;
     this.stream = null;
@@ -126,14 +127,24 @@ export class VisionController {
     if (event.source !== this.frame?.contentWindow) return;
     const message = event.data || {};
     if (message.type === "SIGNBRIDGE_VISION_READY") {
-      this.modelInfo = { words: message.words, letters: message.letters };
+      this.modelInfo = { letters: message.letters };
       this.resolveInitialize?.();
       return;
     }
+    if (message.type === "SIGNBRIDGE_KAGGLE_READY") {
+      this.modelInfo.kaggleReady = true;
+      this.onModelStatus?.(true);
+      return;
+    }
+    if (message.type === "SIGNBRIDGE_KAGGLE_ERROR") {
+      this.modelInfo.kaggleReady = false;
+      this.onModelStatus?.(false, message.message);
+      return;
+    }
     if (!this.running && message.type !== "SIGNBRIDGE_VISION_ERROR") return;
-    if (message.type === "SIGNBRIDGE_WORD_RESULT") { this.onWord?.(message); return; }
     if (message.type === "SIGNBRIDGE_LETTER_RESULT") { this.onLetter?.(message); return; }
-    if (message.type === "SIGNBRIDGE_WORD_UNCERTAIN") { this.onUncertain?.(message); return; }
+    if (message.type === "SIGNBRIDGE_LETTER_PREVIEW") { this.onPreview?.(message); return; }
+    if (message.type === "SIGNBRIDGE_TRANSCRIPT") { this.onTranscript?.(message); return; }
     if (message.type === "SIGNBRIDGE_VISION_ERROR") {
       this.inFlight = false;
       const error = new Error(message.message || "MediaPipe failed");

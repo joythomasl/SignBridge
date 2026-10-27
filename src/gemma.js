@@ -13,25 +13,20 @@ export function checkGemma(settings) {
   return runtimeMessage({ type: "GEMMA_HEALTH", settings });
 }
 
-export function generateAnswer(settings, glosses) {
+export function renderSpelling(settings, spelling) {
   const schema = {
     type: "object",
     properties: {
-      answer: { type: "string" },
-      used_glosses: { type: "array", items: { type: "string" } },
-      needs_clarification: { type: "boolean" }
+      answer: { type: "string" }
     },
-    required: ["answer", "used_glosses", "needs_clarification"]
+    required: ["answer"]
   };
 
   const system = [
-    "You are the constrained language renderer in an accessibility prototype.",
+    "You format literal ASL fingerspelling in an accessibility prototype.",
     "Return JSON only and obey the supplied schema.",
-    "Form one natural English sentence of at most 20 words from the signed glosses alone.",
-    "Use only facts explicitly represented by the glosses. No interviewer question or outside context is available.",
-    "Never add companies, technologies, achievements, metrics, methods, durations, or examples absent from the glosses.",
-    "Preserve numbers and negation exactly.",
-    "If meaning is insufficient, set needs_clarification true and keep the answer literal."
+    "Preserve every letter and word exactly in order. Add only casing and optional final punctuation.",
+    "Never infer, autocomplete, correct, translate, or add words. No interviewer question is available."
   ].join(" ");
 
   return runtimeMessage({
@@ -40,48 +35,7 @@ export function generateAnswer(settings, glosses) {
     schema,
     messages: [
       { role: "system", content: system },
-      { role: "user", content: JSON.stringify({ glosses }) }
-    ]
-  });
-}
-
-export function mapQuestionToSign(settings, question, intents, availableClips) {
-  const intentIds = intents.map((intent) => intent.id);
-  const clipIds = availableClips.map((clip) => clip.id);
-  const schema = {
-    type: "object",
-    properties: {
-      intent: { type: "string", enum: [...intentIds, "UNSUPPORTED"] },
-      exact_clip: { type: "string", enum: ["NONE", ...clipIds] },
-      clips: { type: "array", items: { type: "string", enum: clipIds }, maxItems: 8 },
-      confidence: { type: "number", minimum: 0, maximum: 1 }
-    },
-    required: ["intent", "exact_clip", "clips", "confidence"]
-  };
-
-  const system = [
-    "Map an interview question to a constrained library of Indian Sign Language dataset clips.",
-    "Return JSON only and obey the schema.",
-    "Select exact_clip only when one available phrase label expresses the complete question; otherwise use NONE.",
-    "For clips, select the smallest useful ordered sequence from the available labels and never invent a label.",
-    "Use UNSUPPORTED when no interview intent is a clear match, but clips may still provide an approximate rendering.",
-    "Do not treat ASL and ISL as interchangeable."
-  ].join(" ");
-
-  return runtimeMessage({
-    type: "GEMMA_CHAT",
-    settings,
-    schema,
-    messages: [
-      { role: "system", content: system },
-      {
-        role: "user",
-        content: JSON.stringify({
-          question,
-          supported_intents: intents,
-          available_clips: availableClips
-        })
-      }
+      { role: "user", content: JSON.stringify({ spelling }) }
     ]
   });
 }

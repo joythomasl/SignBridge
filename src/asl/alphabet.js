@@ -1,5 +1,5 @@
-// ASL static alphabet model from mhmdtaha091/SignBridge (MIT).
-// J and Z are motion letters and are deliberately excluded from this classifier.
+// Static ASL handshape model from mhmdtaha091/SignBridge (MIT).
+// J and Z use temporal motion checks in motion.js.
 export function normalizeAslHand(hand) {
   if (!hand || hand.points.length !== 21) return null;
   const p = hand.points;
@@ -7,10 +7,8 @@ export function normalizeAslHand(hand) {
   const mcp = p[9];
   const size = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y, mcp.z - wrist.z);
   const scale = size > 1e-6 ? size : 1;
-  // The source alphabet model used HandLandmarker's selfie-based handedness.
-  // Holistic reports body side on the raw camera image, so its side is flipped
-  // to reproduce the training-time convention.
-  const mirror = hand.side === "right" ? -1 : 1;
+  // Match the source model's HandLandmarker convention: mirror Left.
+  const mirror = hand.side === "left" ? -1 : 1;
   return p.flatMap((point) => [
     ((point.x - wrist.x) / scale) * mirror,
     (point.y - wrist.y) / scale,

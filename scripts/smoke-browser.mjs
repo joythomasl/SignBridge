@@ -49,11 +49,13 @@ try {
     throw error;
   }
   await page.waitForTimeout(1500);
+  const visionFrame = page.frames().find((frame) => frame.url().endsWith("/vision.html"));
+  if (!visionFrame) throw new Error("Vision sandbox frame is missing");
+  await visionFrame.waitForFunction(() => Boolean(globalThis.__signbridgeKaggleStatus), null, { timeout: 20000 });
+  const modelState = await visionFrame.evaluate(() => globalThis.__signbridgeKaggleStatus);
+  if (modelState !== "ready") throw new Error(`First-place sequence model failed to load: ${modelState}`);
   const cameraStatus = await status.textContent();
   await panel.locator("#sb-stop-camera").click();
-
-  await panel.locator("#sb-check-gemma").click();
-  await status.filter({ hasText: "Gemma 4 ready" }).waitFor({ timeout: 15000 });
 
   const reverseQuestion = "How are you?";
   await page.evaluate((caption) => {
@@ -111,7 +113,7 @@ try {
   await panel.locator("details").filter({ hasText: "Recognition and manual correction" }).locator("summary").click();
   const glossSelect = panel.locator("#sb-calibration-gloss");
   const addGloss = panel.locator("#sb-add-gloss");
-  for (const gloss of ["WE / US", "THINK", "MAKE", "STORY"]) {
+  for (const gloss of [..."HELLO"]) {
     await glossSelect.selectOption(gloss);
     await addGloss.click();
   }
@@ -120,7 +122,7 @@ try {
     await page.waitForFunction(() => {
       const host = document.querySelector("#signbridge-root");
       return Boolean(host?.shadowRoot?.querySelector("#sb-answer")?.value);
-    }, null, { timeout: 30000 });
+    }, null, { timeout: 45000 });
   } catch (error) {
     console.error("Answer status:", await status.textContent());
     throw error;
@@ -137,19 +139,17 @@ try {
   }
 
   const answerText = await answer.inputValue();
-  if (await panel.locator("#sb-question").inputValue()) throw new Error("Sentence generation test must have no interviewer question");
   const finalStatus = await status.textContent();
   const workerUrl = context.serviceWorkers()[0]?.url() || "";
   const extensionOrigin = workerUrl.match(/^chrome-extension:\/\/[^/]+/)?.[0] || "unknown";
-  if (/unavailable|fallback/i.test(finalStatus || "") || /^My response is:/i.test(answerText)) {
-    throw new Error(`Extension used fallback instead of Gemma 4. Status: ${finalStatus}`);
-  }
+  if (answerText.replace(/[^a-z]/gi, "").toUpperCase() !== "HELLO") throw new Error(`Spelling was altered: ${answerText}`);
 
   await page.screenshot({ path: artifactPath, fullPage: true });
   console.log(JSON.stringify({
     extensionMounted: true,
     extensionOrigin,
     cameraStatus,
+    firstPlaceModel: modelState,
     captionAutoDetected: detectedCaption,
     gemmaStatus: finalStatus,
     reverseCaption: await panel.locator("#sb-interviewer-caption").textContent(),

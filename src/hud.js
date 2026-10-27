@@ -19,7 +19,7 @@ export class SignBridgeHud {
         <header class="sb-header">
           <div>
             <strong>SignBridge AI</strong>
-            <small>Gemma 4 · ASL word recognition</small>
+            <small>Gemma 4 · ASL fingerspelling A–Z</small>
           </div>
           <div class="sb-header-actions">
             <span id="sb-mode-badge" class="sb-badge">Checking…</span>
@@ -41,35 +41,33 @@ export class SignBridgeHud {
           </section>
 
           <section class="sb-section">
-            <div class="sb-section-title"><span>3</span> Candidate signs</div>
+            <div class="sb-section-title"><span>3</span> Candidate fingerspelling</div>
             <div class="sb-camera-stage">
               <video id="sb-camera" muted playsinline></video>
               <canvas id="sb-canvas"></canvas>
               <div id="sb-detected" class="sb-detected">No gesture</div>
             </div>
-            <div id="sb-word-suggestions" class="sb-chips" hidden></div>
             <div class="sb-row">
               <button id="sb-start-camera" class="sb-primary">Start camera</button>
               <button id="sb-stop-camera" disabled>Stop</button>
             </div>
-            <div class="sb-live-banner"><strong>ASL signs → local speech + Meet chat</strong><small>Signed words form a sentence without needing an interviewer question.</small></div>
+            <div class="sb-live-banner"><strong>ASL fingerspelling → local speech + Meet chat</strong><small>The first-place sequence model checks the completed spelling. Hold each letter, then lower your hand to speak.</small></div>
             <div id="sb-live-state" class="sb-muted" data-active="true">Waiting for camera and signs</div>
-            <div id="sb-gloss-buffer" class="sb-chips sb-buffer"></div>
-            <button id="sb-clear-glosses" class="sb-full-button">Clear current phrase</button>
+            <div id="sb-gloss-buffer" class="sb-spelling" aria-live="polite">Spelled letters appear here</div>
+            <div class="sb-row"><button id="sb-space">Space</button><button id="sb-backspace">Backspace</button><button id="sb-clear-glosses">Clear</button></div>
             <details class="sb-details">
               <summary>Recognition and manual correction</summary>
-              <p class="sb-muted">Complete ASL words are recognized first. Hold a static letter for 1.5 seconds as a fallback. J and Z require motion and are not in the static model.</p>
+              <p class="sb-muted">All 26 letters are available. The live preview uses static handshapes and J/Z motion checks; the sequence model checks the completed spelling. Repeat a letter by briefly releasing your hand. Correct uncertain results below.</p>
               <div class="sb-calibration">
                 <select id="sb-calibration-gloss">${glossOptions}</select>
               </div>
-              <button id="sb-add-gloss" class="sb-full-button">Add selected word or letter manually</button>
-              <div id="sb-calibration-state" class="sb-muted">Use manual correction when a sign is unclear.</div>
+              <button id="sb-add-gloss" class="sb-full-button">Add selected letter manually</button>
             </details>
           </section>
 
           <section class="sb-section">
             <div class="sb-section-title"><span>4</span> Candidate review</div>
-            <textarea id="sb-answer" rows="3" placeholder="Gemma 4 answer appears here for review…"></textarea>
+            <textarea id="sb-answer" rows="3" placeholder="Spelled text appears here for review…"></textarea>
             <label class="sb-check"><input id="sb-approved" type="checkbox"> I reviewed and approve this wording</label>
             <div class="sb-row sb-wrap">
               <button id="sb-speak" disabled>Speak</button>
@@ -105,8 +103,10 @@ export class SignBridgeHud {
     const actions = {
       "#sb-start-camera": "startCamera",
       "#sb-stop-camera": "stopCamera",
-      "#sb-add-gloss": "addGloss",
-      "#sb-clear-glosses": "clearGlosses",
+      "#sb-add-gloss": "addLetter",
+      "#sb-space": "addSpace",
+      "#sb-backspace": "backspace",
+      "#sb-clear-glosses": "clearLetters",
       "#sb-speak": "speak",
       "#sb-copy": "copy",
       "#sb-chat": "insertChat",
@@ -187,6 +187,10 @@ export class SignBridgeHud {
     else label.textContent = `${match.gloss} · ${Math.round(match.score * 100)}%`;
   }
 
+  setPreview(letter) {
+    this.$("#sb-detected").textContent = `Hold / change to accept: ${letter}`;
+  }
+
   showWordSuggestions(candidates, onChoose, current = "") {
     const container = this.$("#sb-word-suggestions");
     container.replaceChildren();
@@ -205,24 +209,9 @@ export class SignBridgeHud {
     this.$("#sb-calibration-state").textContent = progress ? `${message} ${Math.round(progress * 100)}%` : message;
   }
 
-  renderGlosses(glosses, removeHandler) {
+  renderSpelling(letters) {
     const container = this.$("#sb-gloss-buffer");
-    container.replaceChildren();
-    if (!glosses.length) {
-      const empty = document.createElement("span");
-      empty.className = "sb-muted";
-      empty.textContent = "Detected signs will appear here";
-      container.appendChild(empty);
-      return;
-    }
-    glosses.forEach((gloss, index) => {
-      const chip = document.createElement("button");
-      chip.className = "sb-chip";
-      chip.textContent = `${gloss} ×`;
-      chip.title = "Remove sign";
-      chip.addEventListener("click", () => removeHandler(index));
-      container.appendChild(chip);
-    });
+    container.textContent = letters.length ? letters.join("") : "Spelled letters appear here";
   }
 
   setAnswer(answer, needsClarification = false) {

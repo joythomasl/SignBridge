@@ -156,6 +156,7 @@ button:hover:not(:disabled) { background: #20454c; border-color: rgba(116, 237, 
 .sb-full-button { width: 100%; margin-top: 8px; }
 .sb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .sb-buffer { min-height: 29px; }
+.sb-spelling { min-height: 38px; margin-top: 8px; padding: 9px; border-radius: 8px; background: #081b20; color: #8df3e4; font-size: 19px; font-weight: 700; letter-spacing: .08em; overflow-wrap: anywhere; }
 .sb-chip { min-height: 25px; padding: 3px 8px; color: #8df3e4; background: rgba(35, 183, 167, .13); border: 1px solid rgba(69, 218, 201, .25); border-radius: 999px; font-size: 11px; }
 .sb-chip-static { cursor: default; }
 

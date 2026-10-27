@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SignBridge AI",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "A Gemma 4-powered, candidate-controlled sign and speech bridge for Google Meet interviews.",
   "permissions": [
     "storage",
@@ -17,8 +17,10 @@
     "type": "module"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self';"
   },
+  "sandbox": { "pages": ["vision.html"] },
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
@@ -31,11 +33,10 @@
     {
       "resources": [
         "vendor/mediapipe/*",
-        "vendor/ort/*",
+        "vendor/tflite/*",
         "models/*",
         "vision.html",
         "vision-frame.js",
-        "assets/signs/*",
         "assets/asl/*",
         "hud.css"
       ],

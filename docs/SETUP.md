@@ -1,38 +1,20 @@
 # SignBridge AI setup
 
-## Install
-
-1. Install Node.js 20+, Chrome, and Ollama.
-2. In the project directory, run:
-
-```powershell
-npm install
-npm run build
-ollama pull gemma4:e2b-it-q4_K_M
-npm run ollama:serve
-```
-
-3. Keep the Ollama terminal open. In Chrome, open `chrome://extensions`, enable **Developer mode**, select **Load unpacked**, and choose this project's `dist` directory.
-4. Open Google Meet, turn captions on, click **Start camera** in SignBridge, and allow camera access. **Check Gemma** should report that the configured model is ready.
-5. After rebuilding, click **Reload** on the extension card and refresh the Meet tab.
-
-The local ASL word, static alphabet, and MediaPipe Holistic models are included in the repository. The packaged extension needs no model download at runtime.
+1. Install Node.js 20+, Chrome, and Ollama. Run `npm install` and `npm run build` in the project directory.
+2. Run `ollama pull gemma4:e2b-it-q4_K_M`, then `npm run ollama:serve`. Keep the Ollama terminal open.
+3. In Chrome, open `chrome://extensions`, enable Developer mode, choose Load unpacked, and select this project's `dist` directory.
+4. Open Meet, turn captions on, click Start camera in SignBridge, and allow camera access. Check Gemma should report that the configured model is ready.
+5. After rebuilding, click Reload on the extension card and refresh Meet.
 
 ## Demo
 
-1. Speak a question into Meet and confirm that the caption appears in the panel and bottom overlay. You can type the question if Meet captions are unavailable.
-2. Sign one of the supported ASL words such as **HELLO**, **THANK YOU**, **YES**, **NO**, **THINK**, or **TIME**. Complete the motion and briefly pause; watch for the accepted word. If a different word appears, use the alternative word buttons before speaking.
-3. Lower your hands for at least two seconds. Gemma 4 forms a sentence from the captured signs even if no interviewer question was detected. Local TTS speaks it, and Meet chat receives the same text when available.
-4. If a sign is uncertain, repeat it or use **Recognition and manual correction**. The 250-word model does not cover arbitrary interview vocabulary.
+Hold an ASL letter until it appears as a preview, then change to the next handshape. The previous letter is committed on the transition. For the last letter, lower your hand briefly. Spell **H E L L O**; repeat the second L by briefly releasing or resetting your hand. The first-place sequence model then checks the completed spelling. Use the Space button between words. Trace J with the pinky and Z with the index finger. After lowering your hand for about two seconds, the extension speaks the spelled text locally and attempts Meet chat delivery.
 
-## Limitations and troubleshooting
+## Troubleshooting
 
-- **No captions:** Meet captions must be on. Meet's DOM can change; type the question when capture fails. Candidate sign-to-sentence does not require a question.
-- **Wrong word:** Keep your upper body and complete hands in frame, avoid a second person, and complete one sign before starting the next. The model may still make mistakes.
-- **Letters:** Hold a static ASL handshape for 1.5 seconds. J and Z need motion and are manual-only.
-- **Meet chat unavailable:** Open the in-call messages panel. The status now reports whether its composer or Send button was unavailable or whether a draft remained after Send. Manual **Insert in Meet chat** remains available.
-- **No remote audio:** Browser TTS is local. Use Meet chat for remote text or configure a virtual microphone/loopback source in Meet for remote audio.
-- **Gemma unavailable:** Confirm the model is installed and the Ollama launcher is running.
-- **Slow laptop:** Close other camera or GPU-heavy applications. The local Holistic tracker and Gemma 4 both need substantial CPU and memory.
-
-The supplied MS-ASL archive has annotations and video URLs only. Training new signs from it requires obtaining the source video clips and preparing labeled sequences.
+- The sequence model covers A–Z. The live preview model covers 24 static handshapes; J and Z need a visible motion path and may require manual correction.
+- Keep the entire signing hand in frame, use even lighting, and avoid another hand crossing the camera.
+- If letters are wrong, use Backspace and the manual A–Z selector. This prototype has no signer-independent accuracy guarantee.
+- If captions are absent, enable Meet captions; type the question manually if Meet's interface changes.
+- If Meet chat delivery fails, use Insert in Meet chat and inspect the status. Local speech does not automatically reach remote audio.
+- On a slow laptop, close other camera or GPU-heavy applications. The hand tracker is lighter than the former Holistic plus word-model pipeline.
